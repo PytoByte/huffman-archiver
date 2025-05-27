@@ -56,7 +56,7 @@ void FileBufferIO_readbits(FileBufferIO* self, void* ptr, size_t count) {
     
         if (ptr_bit + readed_bits_count > 7) {
             // write readed bits
-            ptr_bytes[ptr_byte] += readed_bits >> (ptr_bit - (8 - readed_bits_count));
+            ptr_bytes[ptr_byte] += readed_bits >> (readed_bits_count - (8 - ptr_bit));
 
             if (ptr_bit - (8 - readed_bits_count) == 0) {
                 ptr_byte++;
@@ -64,15 +64,16 @@ void FileBufferIO_readbits(FileBufferIO* self, void* ptr, size_t count) {
             }
     
             // get remain bits at right position
-            unsigned char bits_remain = readed_bits << (8 - (ptr_bit - (8 - readed_bits_count)));
+            unsigned char bits_remain = readed_bits << (8 - (readed_bits_count - (8 - ptr_bit)));
             // write remain bits in next byte
             ptr_byte++;
             ptr_bytes[ptr_byte] += bits_remain;
             // shift bit pointer
-            ptr_bit = (ptr_bit - (8 - readed_bits_count));
+            ptr_bit = (readed_bits_count - (8 - ptr_bit));
         } else {
             // write readed bits
-            ptr_bytes[ptr_byte] += readed_bits >> (ptr_bit - (8 - readed_bits_count));
+            readed_bits <<= (8 - readed_bits_count);
+            ptr_bytes[ptr_byte] += readed_bits >> ptr_bit;
             // shift bit pointer
             ptr_bit += readed_bits_count;
         }
@@ -110,18 +111,19 @@ void FileBufferIO_writebits(FileBufferIO* self, void* ptr, size_t count) {
             }
     
             // get remain bits at right position
-            unsigned char bits_remain = writing_bits << (8 - (self->byte_p - (8 - writing_bits_count)));
+            unsigned char bits_remain = writing_bits << (8 - (self->bit_p - (8 - writing_bits_count)));
             // write remain bits in next byte
             self->byte_p++;
             if (self->byte_p >= self->buffer_size) FileBufferIO_writebuffer(self);
-            ptr_bytes[self->byte_p] += bits_remain;
+            self->buffer[self->byte_p] += bits_remain;
             // shift bit pointer
-            ptr_bit = (self->bit_p - (8 - writing_bits_count));
+            self->bit_p = (self->bit_p - (8 - writing_bits_count));
         } else {
             // write readed bits
-            self->buffer[self->byte_p] += writing_bits >> (self->bit_p - (8 - writing_bits_count));
+            writing_bits <<= (8 - writing_bits_count);
+            self->buffer[self->byte_p] += writing_bits >> self->bit_p;
             // shift bit pointer
-            ptr_bit += writing_bits_count;
+            self->bit_p += writing_bits_count;
         }
     }
 }
@@ -131,8 +133,8 @@ FileBufferIO* FileBufferIO_create(const char* filename, const char* modes, size_
     fb->fp = fopen(filename, modes);
     fb->buffer = (char*)malloc(buffer_size);
     fb->buffer_size = buffer_size;
-    fb->byte_p = 0;
-    fb->bit_p = 0;
+    fb->byte_p = -1;
+    fb->bit_p = -1;
     fb->readbits = FileBufferIO_readbits;
     fb->writebits = FileBufferIO_writebits;
     return fb;
