@@ -1,14 +1,17 @@
 #pragma once
 
-#include <stdlib.h>
-#include <limits.h>
-
 typedef struct HuffmanNode {
     unsigned char byte;
     unsigned long long freq;
     struct HuffmanNode* left;
     struct HuffmanNode* right;
 } HuffmanNode;
+
+typedef struct {
+    HuffmanNode* tree;
+    int node_count;
+    int leaf_count;
+} HuffmanTree;
 
 HuffmanNode* HuffmanNode_create(
     unsigned char byte,
@@ -19,7 +22,7 @@ HuffmanNode* HuffmanNode_create(
 
 typedef struct {
     short size;
-    HuffmanNode* nodes[UCHAR_MAX+1];
+    HuffmanNode* nodes[256];
 } MinHeap;
 
 MinHeap* MinHeap_create();
@@ -29,4 +32,4 @@ void MinHeap_insert(MinHeap* heap, HuffmanNode* node);
 HuffmanNode* MinHeap_extract(MinHeap* heap);
 
 // Извлечение всех узлов в формате бинарного дерева
-HuffmanNode* MinHeap_extract_tree(MinHeap* heap);
+HuffmanTree MinHeap_extract_tree(MinHeap* heap);

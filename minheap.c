@@ -1,5 +1,7 @@
 #include "minheap.h"
 
+#include <stdio.h>
+
 HuffmanNode* HuffmanNode_create(
     unsigned char byte,
     unsigned long long freq,
@@ -75,8 +77,7 @@ static void heapify_down(MinHeap* heap, unsigned char i) {
 
 void MinHeap_insert(MinHeap* heap, HuffmanNode* node) {
     heap->nodes[heap->size] = node;
-    heapify_up(heap, heap->size);
-    heap->size++;
+    heapify_up(heap, heap->size++);
 }
 
 HuffmanNode* MinHeap_extract(MinHeap* heap) {
@@ -87,7 +88,11 @@ HuffmanNode* MinHeap_extract(MinHeap* heap) {
 }
 
 // Извлечение всех узлов в формате бинарного дерева
-HuffmanNode* MinHeap_extract_tree(MinHeap* heap) {
+HuffmanTree MinHeap_extract_tree(MinHeap* heap) {
+    HuffmanTree tree;
+    tree.leaf_count = heap->size;
+    tree.node_count = heap->size;
+
     while (heap->size != 1) {
         HuffmanNode* node1 = MinHeap_extract(heap);
         HuffmanNode* node2 = MinHeap_extract(heap);
@@ -99,10 +104,14 @@ HuffmanNode* MinHeap_extract_tree(MinHeap* heap) {
         } else {
             merge_node = HuffmanNode_create(0, node1->freq+node2->freq, node1, node2);
         }
+        tree.node_count++;
 
         MinHeap_insert(heap, merge_node);
     }
 
-    HuffmanNode* tree = MinHeap_extract(heap);
+    tree.tree = MinHeap_extract(heap);
+
+    heap->size = 0;
+
     return tree;
 }
