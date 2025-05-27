@@ -1,6 +1,7 @@
 #include "minheap.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 
 HuffmanNode* HuffmanNode_create(
     unsigned char byte,
@@ -15,13 +16,6 @@ HuffmanNode* HuffmanNode_create(
     node->left = left;
     node->right = right;
     return node;
-}
-
-MinHeap* MinHeap_create() {
-    MinHeap* heap = (MinHeap*)malloc(sizeof(MinHeap));
-    if (heap == NULL) return NULL;
-    heap->size = 0;
-    return heap;
 }
 
 // Начало === Поддержание свойств кучи ===
@@ -75,27 +69,25 @@ static void heapify_down(MinHeap* heap, unsigned char i) {
 }
 // Конец === Поддержание свойств кучи ===
 
-void MinHeap_insert(MinHeap* heap, HuffmanNode* node) {
-    heap->nodes[heap->size] = node;
-    heapify_up(heap, heap->size++);
+static void insert(MinHeap* self, HuffmanNode* node) {
+    self->nodes[self->size] = node;
+    heapify_up(self, self->size++);
 }
 
-HuffmanNode* MinHeap_extract(MinHeap* heap) {
-    HuffmanNode* res = heap->nodes[0];
-    swap(&heap->nodes[0], &heap->nodes[--heap->size]);
-    heapify_down(heap, 0);
+static HuffmanNode* extract(MinHeap* self) {
+    HuffmanNode* res = self->nodes[0];
+    swap(&self->nodes[0], &self->nodes[--self->size]);
+    heapify_down(self, 0);
     return res;
 }
 
 // Извлечение всех узлов в формате бинарного дерева
-HuffmanTree MinHeap_extract_tree(MinHeap* heap) {
-    HuffmanTree tree;
-    tree.leaf_count = heap->size;
-    tree.node_count = heap->size;
+static HuffmanNode* extract_tree(MinHeap* self) {
+    HuffmanNode* tree;
 
-    while (heap->size != 1) {
-        HuffmanNode* node1 = MinHeap_extract(heap);
-        HuffmanNode* node2 = MinHeap_extract(heap);
+    while (self->size != 1) {
+        HuffmanNode* node1 = extract(self);
+        HuffmanNode* node2 = extract(self);
 
         // Создание детерминированности. Среди двух минимальных по частоте узлов, правее = больше частота
         HuffmanNode* merge_node = NULL;
@@ -104,14 +96,33 @@ HuffmanTree MinHeap_extract_tree(MinHeap* heap) {
         } else {
             merge_node = HuffmanNode_create(0, node1->freq+node2->freq, node1, node2);
         }
-        tree.node_count++;
 
-        MinHeap_insert(heap, merge_node);
+        insert(self, merge_node);
     }
 
-    tree.tree = MinHeap_extract(heap);
+    tree = extract(self);
 
-    heap->size = 0;
+    self->size = 0;
 
     return tree;
+}
+
+MinHeap* MinHeap_create() {
+    MinHeap* heap = (MinHeap*)malloc(sizeof(MinHeap));
+    if (heap == NULL) return NULL;
+    heap->size = 0;
+    heap->insert = insert;
+    heap->extract = extract;
+    heap->extract_tree = extract_tree;
+    return heap;
+}
+
+void MinHeap_free(MinHeap* heap) {
+    free(heap);
+}
+
+void HuffmanNode_freetree(HuffmanNode* tree) {
+    if (tree->left) HuffmanNode_freetree(tree->left);
+    if (tree->right) HuffmanNode_freetree(tree->right);
+    free(tree);
 }

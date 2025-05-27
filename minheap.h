@@ -7,12 +7,6 @@ typedef struct HuffmanNode {
     struct HuffmanNode* right;
 } HuffmanNode;
 
-typedef struct {
-    HuffmanNode* tree;
-    int node_count;
-    int leaf_count;
-} HuffmanTree;
-
 HuffmanNode* HuffmanNode_create(
     unsigned char byte,
     unsigned long long freq,
@@ -20,16 +14,16 @@ HuffmanNode* HuffmanNode_create(
     HuffmanNode* right
 );
 
-typedef struct {
+typedef struct MinHeap {
     short size;
     HuffmanNode* nodes[256];
+    void (*insert)(struct MinHeap* self, HuffmanNode* node);
+    HuffmanNode* (*extract)(struct MinHeap* self);
+    HuffmanNode* (*extract_tree)(struct MinHeap* self);
 } MinHeap;
 
 MinHeap* MinHeap_create();
 
-void MinHeap_insert(MinHeap* heap, HuffmanNode* node);
+void MinHeap_free(MinHeap* heap);
 
-HuffmanNode* MinHeap_extract(MinHeap* heap);
-
-// Извлечение всех узлов в формате бинарного дерева
-HuffmanTree MinHeap_extract_tree(MinHeap* heap);
+void HuffmanNode_freetree(HuffmanNode* tree);
