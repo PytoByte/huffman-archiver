@@ -16,19 +16,22 @@ static void nextbuffer(FileBufferIO* self) {
 }
 
 static size_t writebuffer(FileBufferIO* self) {
+    if (self->byte_p==0 && self->bit_p==0) return 0;
+
+    size_t wrote_bits_count = fwrite(self->buffer, 1, self->byte_p+1, self->fp);
     self->byte_p = 0;
     self->bit_p = 0;
-    return fwrite(self->buffer, 1, self->byte_p, self->fp);
+    return wrote_bits_count;
 }
 
-static size_t readbits(FileBufferIO* self, void* ptr, size_t count) {
+static size_t readbits(FileBufferIO* self, void* ptr, unsigned char startbit, size_t count) {
     size_t readed_bits_count_total = 0;
 
     char* ptr_bytes = (char*)ptr;
     ptr_bytes[0] = 0;
 
     unsigned long ptr_byte = 0;
-    unsigned char ptr_bit = 0;
+    unsigned char ptr_bit = startbit;
 
     while (count) {
         // next buffer if current end
@@ -73,6 +76,7 @@ static size_t readbits(FileBufferIO* self, void* ptr, size_t count) {
 
             if ((readed_bits_count + ptr_bit - 8) == 0) {
                 ptr_byte++;
+                ptr_bit = 0;
                 continue;
             }
     
@@ -96,33 +100,55 @@ static size_t readbits(FileBufferIO* self, void* ptr, size_t count) {
     return readed_bits_count_total;
 }
 
-static void writebits(FileBufferIO* self, void* ptr, size_t count) {
+static size_t writebits(FileBufferIO* self, void* ptr, unsigned char startbit, size_t count) {
+    size_t wrote_bits_count_total = 0;
+
     char* ptr_bytes = (char*)ptr;
     unsigned long ptr_byte = 0;
-    unsigned char ptr_bit = 0;
+    unsigned char ptr_bit = startbit;
 
     while (count) {
         if (self->byte_p >= self->buffer_size) writebuffer(self);
 
         unsigned char writing_bits = 0;
         unsigned char writing_bits_count = 0;
-        
-        if (count > 8) {
-            writing_bits = ptr_bytes[ptr_byte];
-            writing_bits_count = 8;
-            count -= writing_bits_count;
-            ptr_byte++;
-        } else {
-            writing_bits = ptr_bytes[ptr_byte] >> (8 - count);
-            writing_bits_count = count;
-            count = 0;
-        }
+
+        if ((size_t)self->bit_p + count > 7) {
+            // clear bits from before readed
+            writing_bits = ptr_bytes[ptr_byte] << ptr_bit;
+            writing_bits >>= ptr_bit;
     
+            // get readed bits count
+            writing_bits_count = 8 - ptr_bit;
+            // change count of requiring bits
+            count -= writing_bits_count;
+    
+            // shift pointers
+            ptr_byte++;
+            ptr_bit = 0;
+        } else {
+            // clear bits from readed
+            writing_bits = ptr_bytes[ptr_byte] << ptr_bit;
+            // get exact required bits
+            writing_bits >>= (8 - count);
+    
+            // get readed bits count
+            writing_bits_count = count;
+            // change count of requiring bits
+            count = 0;
+    
+            // shift pointers
+            ptr_bit += writing_bits_count;
+        }
+
+        wrote_bits_count_total += writing_bits_count;
+
         if (self->bit_p + writing_bits_count > 7) {
             // write bits
             self->buffer[self->byte_p] += writing_bits >> (self->bit_p + writing_bits_count - 8);
             if (self->bit_p - (8 - writing_bits_count) == 0) {
                 self->byte_p++;
+                self->bit_p = 0;
                 continue;
             }
     
@@ -142,9 +168,11 @@ static void writebits(FileBufferIO* self, void* ptr, size_t count) {
             self->bit_p += writing_bits_count;
         }
     }
+
+    return wrote_bits_count_total;
 }
 
-FileBufferIO* FileBufferIO_create(const char* filename, const char* modes, size_t buffer_size) {
+FileBufferIO* FileBufferIO_open(const char* filename, const char* modes, size_t buffer_size) {
     FileBufferIO* fb = (FileBufferIO*)malloc(sizeof(FileBufferIO));
     fb->fp = fopen(filename, modes);
     fb->modes = (char*)malloc(strlen(modes));
@@ -160,7 +188,8 @@ FileBufferIO* FileBufferIO_create(const char* filename, const char* modes, size_
 }
 
 void FileBufferIO_close(FileBufferIO* fb) {
-    if (strchr(fb->modes, 'w') && fb->bit_p > 0) {
+    printf("%s, %d\n", fb->modes, strchr(fb->modes, 'w')!=NULL);
+    if (strchr(fb->modes, 'w') && (fb->bit_p > 0 || fb->byte_p>0)) {
         writebuffer(fb);
     }
 

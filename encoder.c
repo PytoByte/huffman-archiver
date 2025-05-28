@@ -35,11 +35,11 @@ void build_codes(Code* codes, HuffmanNode* tree, unsigned char cur_code, int cod
 void fwrite_tree(HuffmanNode* tree, FileBufferIO* stream_write) {
     if (tree->left == NULL && tree->right == NULL) {
         unsigned char state = 1;
-        stream_write->writebits(stream_write, &state, 1);
-        stream_write->writebits(stream_write, &tree->byte, sizeof(tree->byte)*8);
+        stream_write->writebits(stream_write, &state, 7, 1);
+        stream_write->writebits(stream_write, &tree->byte, 0, sizeof(tree->byte)*8);
     } else {
         unsigned char state = 0;
-        stream_write->writebits(stream_write, &state, 1);
+        stream_write->writebits(stream_write, &state, 7, 1);
         fwrite_tree(tree->left, stream_write);
         fwrite_tree(tree->right, stream_write);
     }
@@ -50,12 +50,12 @@ HuffmanNode* fread_tree(FileBufferIO* stream_read) {
     HuffmanNode* node = HuffmanNode_create(0, 0, NULL, NULL);
 
     unsigned char state;
-    stream_read->readbits(stream_read, &state, 1);
+    stream_read->readbits(stream_read, &state, 7, 1);
     if (state == 0) {
         node->left = fread_tree(stream_read);
         node->right = fread_tree(stream_read);
     } else {
-        fread(&node->byte, sizeof(node->byte), 1, stream_read);
+        stream_read->readbits(stream_read, &node->byte, 0, sizeof(node->byte)*8);
     }
 
     return node;
@@ -88,7 +88,7 @@ long long get_filesize(FILE* fp) {
 }
 
 void encode() {
-    FileBufferIO* file_encode = FileBufferIO_create("test.txt", "rb", BUFFER_SIZE);
+    FileBufferIO* file_encode = FileBufferIO_open("test.txt", "rb", BUFFER_SIZE);
     long long filesize = get_filesize(file_encode->fp);
 
     printf("file size: %lld\n", filesize);
@@ -98,7 +98,7 @@ void encode() {
 
     unsigned char byte = 0;
 
-    while (file_encode->readbits(file_encode, &byte, sizeof(byte)*8)) {
+    while (file_encode->readbits(file_encode, &byte, 0, sizeof(byte)*8)) {
         freqs[byte]++;
     }
 
@@ -113,7 +113,7 @@ void encode() {
     }
 
     HuffmanNode* tree = heap->extract_tree(heap);
-    free(heap);
+    MinHeap_free(heap);
 
     // Кодировка по дереву
     Code codes[256] = {0};
@@ -124,65 +124,50 @@ void encode() {
     rewind(file_encode->fp);
 
     // Сначала во временный файл без дополнительных данных
-    FileBufferIO* file_temp = FileBufferIO_create("temp", "wb", BUFFER_SIZE);
+    FileBufferIO* file_temp = FileBufferIO_open("temp", "wb", BUFFER_SIZE);
 
     unsigned long long filesize_total = 0; // Размер сжатого файла в байтах
     unsigned char filesize_tail = 0;       // Используемые биты в последнем байте (хвосте)
 
     // Сжатие со спрессовыванием кодов
-    unsigned char byte_fill = 0;
-    unsigned char byte_writing = 0;
-    while (file_encode->readbits(file_encode, &byte, sizeof(byte)*8)) {
-        if (byte_fill+codes[byte].size < 8) {
-            byte_fill += codes[byte].size;
-            byte_writing += codes[byte].code << (8 - byte_fill);
-        } else {
-            byte_writing += (codes[byte].code << (8 - codes[byte].size)) >> byte_fill;
-            file_temp->writebits(file_temp, &byte_writing, sizeof(byte_writing)*8);
-            filesize_total++;
-            unsigned char remover = codes[byte].code << ((8 - codes[byte].size) + (8 - byte_fill));
-
-            byte_fill = codes[byte].size - (8 - byte_fill);
-            byte_writing = remover;
-        }
+    while (file_encode->readbits(file_encode, &byte, 0, sizeof(byte)*8)) {
+        filesize_total += file_temp->writebits(file_temp, &codes[byte].code, 8-codes[byte].size, codes[byte].size);
     }
+    filesize_tail = filesize_total % 8;
+    filesize_total = filesize_total / 8 + (filesize_tail > 0);
 
-    // Запись хвоста
-    if (byte_fill>0) {
-        filesize_tail = byte_fill;
-        file_temp->writebits(file_temp, &byte_writing, sizeof(byte_writing)*8);
-        filesize_total++;
-    }
     FileBufferIO_close(file_encode); // Файл сжат
     FileBufferIO_close(file_temp); // file_temp содержит сжатый file_encode, без дополнительный данных
 
     // Запись file_temp в file_archive с дополнительными данными
-    file_temp = FileBufferIO_create("temp", "rb", BUFFER_SIZE);
+    file_temp = FileBufferIO_open("temp", "rb", BUFFER_SIZE);
 
     // Данные для расшифровки
-    FileBufferIO* file_archive = FileBufferIO_create("archive.huff", "wb", BUFFER_SIZE);
+    FileBufferIO* file_archive = FileBufferIO_open("archive.huff", "wb", BUFFER_SIZE);
     printf("compressed size %llu\n", filesize_total);
-    file_archive->writebits(file_archive, &filesize_total, sizeof(filesize_total)*8);
-    file_archive->writebits(file_archive, &filesize_tail, sizeof(filesize_tail)*8);
+    file_archive->writebits(file_archive, &filesize_total, 0, sizeof(filesize_total)*8);
+    file_archive->writebits(file_archive, &filesize_tail, 0, sizeof(filesize_tail)*8);
     fwrite_tree(tree, file_archive);
+    HuffmanNode_freetree(tree);
 
-    while (fread(&byte, sizeof(byte), 1, file_temp)) {
-        fwrite(&byte, sizeof(byte), 1, file_archive);
+    while (file_temp->readbits(file_temp, &byte, 0, sizeof(byte)*8)) {
+        file_archive->writebits(file_archive, &byte, 0, sizeof(byte)*8);
     }
     
-    fclose(file_temp);
+    FileBufferIO_close(file_temp);
+    FileBufferIO_close(file_archive);
 
-    fclose(file_archive);
+    return;
 }
 
 void decode() {
-    FILE* file_archive = fopen("archive.huff", "rb");
+    FileBufferIO* file_archive = FileBufferIO_open("archive.huff", "rb", BUFFER_SIZE);
 
     unsigned long long filesize_total = 0; // Размер сжатого файла в байтах
     unsigned char filesize_tail = 0;       // Используемые биты в последнем байте (хвосте)
 
-    fread(&filesize_total, sizeof(filesize_total), 1, file_archive);
-    fread(&filesize_tail, sizeof(filesize_tail), 1, file_archive);
+    file_archive->readbits(file_archive, &filesize_total, 0, sizeof(filesize_total)*8);
+    file_archive->readbits(file_archive, &filesize_tail, 0, sizeof(filesize_tail)*8);
     HuffmanNode* tree = fread_tree(file_archive);
 
     Code codes[256];
@@ -192,7 +177,7 @@ void decode() {
     HuffmanNode* node_cur = tree;
     for (unsigned long long i = 0; i < filesize_total; i++) {
         unsigned char byte;
-        fread(&byte, sizeof(byte), 1, file_archive);
+        file_archive->readbits(file_archive, &byte, 0, sizeof(byte)*8);
 
         for (int j = 0; j < 8; j++) {
             unsigned char bit = byte<<j;
@@ -217,12 +202,12 @@ void decode() {
     }
     printf("\n");
 
-    fclose(file_archive);
+    FileBufferIO_close(file_archive);
 }
 
 int main() {
     encode();
-    decode();
+    //decode();
 
     return 0;
 }
