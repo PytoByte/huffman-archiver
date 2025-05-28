@@ -1,2 +1,2 @@
 all:
-	gcc -o huffman main.c
+	gcc -o huffman-archiver main.c archiver.c minheap.c buffio.c -g

@@ -13,8 +13,7 @@ typedef struct FileBufferIO {
     size_t (*writebits)(struct FileBufferIO* self, void* ptr, unsigned char startbit, size_t count);
 } FileBufferIO;
 
-#include <stdio.h>
-#include <stdlib.h>
+size_t writebuffer(FileBufferIO* self);
 
 FileBufferIO* FileBufferIO_open(const char* filename, const char* modes, size_t buffer_size);
 

@@ -15,12 +15,14 @@ static void nextbuffer(FileBufferIO* self) {
     }
 }
 
-static size_t writebuffer(FileBufferIO* self) {
+size_t writebuffer(FileBufferIO* self) {
     if (self->byte_p==0 && self->bit_p==0) return 0;
 
-    size_t wrote_bits_count = fwrite(self->buffer, 1, self->byte_p+1, self->fp);
+    size_t wrote_bits_count = fwrite(self->buffer, 1, self->byte_p+(self->bit_p>0), self->fp);
     self->byte_p = 0;
     self->bit_p = 0;
+
+    memset(self->buffer, 0, self->buffer_size);
     return wrote_bits_count;
 }
 

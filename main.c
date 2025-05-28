@@ -2,17 +2,19 @@
 #include <string.h>
 #include <stdarg.h>
 
+#include "archiver.h"
+
 void command_help(int argc, char** argv) {
     printf("Usage: huffman [command] ...\n");
     printf("brbrbruh\n");
 }
 
-void command_encrypt(int argc, char** argv) {
-
+void command_compress(int argc, char** argv) {
+    compress(argc, argv, "archive.huff");
 }
 
-void command_decrypt(int argc, char** argv) {
-
+void command_decompress(int argc, char** argv) {
+    decompress("out/", "archive.huff");
 }
 
 char asciitolower(char c) {
@@ -60,10 +62,10 @@ int main(int argc, char* argv[]) {
 
     if (check_command(command, 2, "--h", "--help")) {
         command_help(params_c, params);
-    } else if (check_command(command, 1, "-e")) {
-        command_encrypt(params_c, params);
+    } else if (check_command(command, 1, "-c")) {
+        command_compress(params_c, params);
     } else if (check_command(command, 1, "-d")) {
-        command_decrypt(params_c, params);
+        command_decompress(params_c, params);
     } else {
         command_help(0, NULL);
     }
