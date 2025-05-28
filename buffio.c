@@ -177,7 +177,7 @@ FileBufferIO* FileBufferIO_open(const char* filename, const char* modes, size_t 
     fb->fp = fopen(filename, modes);
     fb->modes = (char*)malloc(strlen(modes));
     strcpy(fb->modes, modes);
-    fb->buffer = (char*)malloc(buffer_size);
+    fb->buffer = (char*)calloc(buffer_size, sizeof(char));
     fb->buffer_size = buffer_size;
     fb->buffer_readspace = 0;
     fb->byte_p = -1;
@@ -188,7 +188,6 @@ FileBufferIO* FileBufferIO_open(const char* filename, const char* modes, size_t 
 }
 
 void FileBufferIO_close(FileBufferIO* fb) {
-    printf("%s, %d\n", fb->modes, strchr(fb->modes, 'w')!=NULL);
     if (strchr(fb->modes, 'w') && (fb->bit_p > 0 || fb->byte_p>0)) {
         writebuffer(fb);
     }
