@@ -12,7 +12,7 @@
 #define BUFFER_SIZE 4096
 
 typedef struct {
-    unsigned char code;
+    unsigned long long code;
     int size;
 } Code;
 
