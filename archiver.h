@@ -12,9 +12,14 @@
 #define BUFFER_SIZE 4096
 
 typedef struct {
-    unsigned long long code;
+    unsigned char* code;
     int size;
 } Code;
+
+typedef struct {
+    Code* codes;
+    int size;
+} Codes;
 
 void compress(int files_count, char** filenames, char* archivename);
 

@@ -13,30 +13,65 @@
 
 #define BUFFER_SIZE 4096
 
-static void printbin(unsigned long long code, unsigned int size) {
-    for (int i = 8-size; i < 8; i++) {
-        unsigned char bit = code<<i;
-        bit >>= 7;
+static void logwait(char* msg) {
+    printf("%s\n", msg);
+    getchar();
+}
+
+static void printbin(unsigned char num, unsigned int size) {
+    for (int i = sizeof(num)-size; i < sizeof(num); i++) {
+        unsigned char bit = num<<i;
+        bit >>= sizeof(num)-1;
         printf("%d", bit);
     }
 }
 
-static void build_codes(Code* codes, HuffmanNode* tree, unsigned long long cur_code, int code_size) {
+// Заполняет список кодов по дереву
+// tree - дерево
+// codes - список кодов (заполняется)
+// curcode - текущий код
+// codesize - размер текущего кода в битах
+static void build_codes_reqursion(HuffmanNode* tree, Code* codes, unsigned char* curcode, int codesize) {
     if (tree->left == NULL && tree->right == NULL) {
-        codes[tree->byte] = (Code){.code=cur_code, .size=code_size};
-        return;
-    }
-    
-    if (tree->left != NULL) {
-        build_codes(codes, tree->left, cur_code<<1, code_size+1);
-    }
-
-    if (tree->right != NULL) {
-        build_codes(codes, tree->right, (cur_code<<1) + 1, code_size+1);
+        unsigned int codesize_bytes = codesize / 8 + (codesize % 8 > 0);
+        codes[tree->byte].size = codesize;
+        codes[tree->byte].code = (unsigned char*)malloc(codesize_bytes);
+        for (int i = 0; i < codesize_bytes; i++) {
+            codes[tree->byte].code[i] = curcode[i];
+        }
+    } else {
+        build_codes_reqursion(tree->left, codes, curcode, codesize + 1);
+        unsigned int lastbyte = codesize / 8;
+        unsigned char lastbit = codesize % 8;
+        curcode[lastbyte] += 1 << (7 - lastbit);
+        build_codes_reqursion(tree->right, codes, curcode, codesize + 1);
+        curcode[lastbyte] -= 1 << (7 - lastbit);
     }
 }
 
+// Запускает build_codes_reqursion
+// tree - дерево
+// wordsize - длина слова байтах
+// ! Возвращаемое значение требует очистки !
+static Codes build_codes(HuffmanNode* tree, size_t wordsize) {
+    Codes codes;
+    codes.size = 1 << (wordsize*8);
+    codes.codes = (Code*)calloc(codes.size, sizeof(Code));
+    unsigned char* curcode = (unsigned char*)calloc(2<<(wordsize*8 - 3), 1);
+
+    build_codes_reqursion(tree, codes.codes, curcode, 0);
+    free(curcode);
+
+    return codes;
+}
+
+void codes_free(Codes codes) {
+    free(codes.codes);
+}
+
 // Запись дерева в префиксной форме
+// tree - дерево
+// stream_write - поток вывода
 static size_t fwrite_tree(HuffmanNode* tree, FileBufferIO* stream_write) {
     size_t tree_size = 0;
     if (tree->left == NULL && tree->right == NULL) {
@@ -54,11 +89,13 @@ static size_t fwrite_tree(HuffmanNode* tree, FileBufferIO* stream_write) {
 }
 
 // Чтение дерева из файла
+// stream_read - поток ввода
+// ! Возвращаемое значение требует очистки !
 static HuffmanNode* fread_tree(FileBufferIO* stream_read) {
     HuffmanNode* node = HuffmanNode_create(0, 0, NULL, NULL);
 
     unsigned char state = 0;
-    stream_read->readbits(stream_read, &state, 7, 1);
+    int s = stream_read->readbits(stream_read, &state, 7, 1);
     if (state == 0) {
         node->left = fread_tree(stream_read);
         node->right = fread_tree(stream_read);
@@ -69,14 +106,22 @@ static HuffmanNode* fread_tree(FileBufferIO* stream_read) {
     return node;
 }
 
-static void printcodes(Code* codes, unsigned int size) {
-    for (int i = 0; i < size; i++) {
-        if (codes[i].size==0) {
+static void printcodes(Codes codes) {
+    for (int i = 0; i < codes.size; i++) {
+        int codesize = codes.codes[i].size;
+        codesize = codesize / 8 + (codesize % 8 > 0);
+        if (codesize==0) {
             continue;
         }
         printf("code ");
-        printbin(codes[i].code, codes[i].size);
-        printf(" size %d value %c\n", codes[i].size, i);
+        for (int j = 0; j < codesize; j++) {
+            if ( codesize - j >= 8 ) {
+                printbin(codes.codes[i].code[j], 8);
+            } else {
+                printbin(codes.codes[i].code[j], codes.codes[i].size % 8);
+            }
+        }
+        printf(" size %d value %c\n", codes.codes[i].size, i);
     }
 }
 
@@ -139,10 +184,13 @@ FilesInfo prepare_archive(FileBufferIO* file_archive, int* files_count, char** f
 
         files_info.total_size += filesize;
 
-        files_info.files_info[i].name_pos = file_archive->byte_p;
-        file_archive->writebits(file_archive, filename, 0, (strlen(filename)+1)*8);
+        files_info.files_info[i].name_pos = file_archive->byte_p+1;
 
-        files_info.files_info[i].size_pos = file_archive->byte_p;
+        int filename_len = (strlen(filename)+1);
+        file_archive->writebits(file_archive, &filename_len, 0, sizeof(filename_len)*8);
+        file_archive->writebits(file_archive, filename, 0, filename_len*8);
+
+        files_info.files_info[i].size_pos = file_archive->byte_p+1;
         file_archive->writebits(file_archive, &filesize_default, 0, sizeof(filesize_default)*8);
         file_archive->writebits(file_archive, &treesize_default, 0, sizeof(treesize_default)*8);
         fclose(fp);
@@ -163,10 +211,11 @@ FilesInfo get_files_info(FileBufferIO* file_archive) {
     file_archive->readbits(file_archive, &files_info.files_count, 0, sizeof(files_info.files_count)*8);
     files_info.files_info = (FileInfo*)malloc(sizeof(FileInfo)*files_info.files_count);
     for (int i = 0; i < files_info.files_count; i++) {
-        int namesize = strlen(&file_archive->buffer[file_archive->byte_p]);
-        files_info.files_info[i].filename = (char*)malloc(sizeof(char)*namesize+1);
+        int filename_len = 0;
+        file_archive->readbits(file_archive, &filename_len, 0,sizeof(filename_len)*8);
+        files_info.files_info[i].filename = (char*)malloc(filename_len);
 
-        file_archive->readbits(file_archive, &files_info.files_info[i].filename, 0, (namesize+1)*8);
+        file_archive->readbits(file_archive, &files_info.files_info[i].filename, 0, filename_len*8);
         file_archive->readbits(file_archive, &files_info.files_info[i].filesize, 0, sizeof(files_info.files_info[i].filesize)*8);
         file_archive->readbits(file_archive, &files_info.files_info[i].treesize, 0, sizeof(files_info.files_info[i].treesize)*8);
         files_info.files_start = file_archive->byte_p;
@@ -180,6 +229,9 @@ void compress(int files_count, char** filenames, char* archivename) {
     FileBufferIO* file_archive = FileBufferIO_open(archivename, "wb", BUFFER_SIZE);
     FilesInfo files_info = prepare_archive(file_archive, &files_count, filenames);
     unsigned long long files_size_total = files_info.total_size;
+
+    //FileBufferIO_close(file_archive);
+    //return;
 
     printf("Files count: %d\n", files_count);
     printf("Size before compress: %lld\n\n", files_size_total);
@@ -198,7 +250,6 @@ void compress(int files_count, char** filenames, char* archivename) {
         unsigned long long freqs[256] = {0};
     
         unsigned char byte = 0;
-    
         while (file_compress->readbits(file_compress, &byte, 0, sizeof(byte)*8)) {
             freqs[byte]++;
         }
@@ -216,27 +267,24 @@ void compress(int files_count, char** filenames, char* archivename) {
         MinHeap_free(heap);
     
         // Кодировка по дереву
-        Code codes[256] = {0};
-        build_codes(codes, tree, 0, 0);
-        printcodes(codes, 256);
+        Codes codes = build_codes(tree, 1);
+        printcodes(codes);
     
         // Сжатие файла
         rewind(file_compress->fp);
 
         unsigned long long compress_filesize = 0; // Размер сжатого файла в байтах
-        unsigned int compress_treesize = 0;      // Используемые биты в последнем байте (хвосте)
+        unsigned int compress_treesize = fwrite_tree(tree, file_archive); // Размер дерева
 
-        compress_treesize += fwrite_tree(tree, file_archive);
         compress_filesize += compress_treesize;
 
-        printf("\n");
         HuffmanNode_freetree(tree);
     
         // Сжатие со спрессовыванием кодов
         while (file_compress->readbits(file_compress, &byte, 0, sizeof(byte)*8)) {
-            printf("%c\n", byte);
-            compress_filesize += file_archive->writebits(file_archive, &codes[byte].code, 64-codes[byte].size, codes[byte].size);
+            compress_filesize += file_archive->writebits(file_archive, codes.codes[byte].code, 0, codes.codes[byte].size);
         }
+        codes_free(codes);
         
         FileBufferIO_close(file_compress); // Файл сжат
 
@@ -263,6 +311,9 @@ void decompress(char* dir, char* archivename) {
         unsigned int compress_treesize = files_info.files_info[i].treesize;  // Используемые биты в последнем байте (хвосте)
 
         HuffmanNode* tree = fread_tree(file_archive);
+        Codes codes = build_codes(tree, 1);
+        printcodes(codes);
+        codes_free(codes);
 
         HuffmanNode* node_cur = tree;
         for (unsigned long long i = 0; i < compress_size - compress_treesize; i++) {
