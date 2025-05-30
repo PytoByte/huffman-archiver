@@ -5,7 +5,7 @@
 #include "buffio.h"
 
 // Чтение буфера из файла
-static void nextbuffer(FileBufferIO* self) {
+void nextbuffer(FileBufferIO* self) {
     self->buffer_readspace = fread(self->buffer, 1, self->buffer_size, self->fp);
     if (self->buffer_readspace == 0) {
         self->byte_p = -1;
@@ -28,7 +28,7 @@ size_t writebuffer(FileBufferIO* self) {
     return wrote_bits_count;
 }
 
-static size_t readbits(FileBufferIO* self, void* ptr, unsigned long long startbit, size_t count) {
+static size_t readbits(FileBufferIO* self, const void* ptr, unsigned long long startbit, size_t count) {
     size_t readed_bits_count_total = 0;
 
     char* src = (char*)ptr;
@@ -116,6 +116,14 @@ static size_t writebits(FileBufferIO* self, const void* ptr, unsigned long long 
     return wrote_bits_count_total;
 }
 
+static size_t writebytes(FileBufferIO* self, const void* ptr, unsigned long long startbit, size_t count) {
+    writebits(self, ptr, startbit, count*8);
+}
+
+static size_t readbytes(FileBufferIO* self, const void* ptr, unsigned long long startbit, size_t count) {
+    readbits(self, ptr, startbit, count*8);
+}
+
 FileBufferIO* FileBufferIO_open(const char* filename, const char* modes, size_t buffer_size) {
     FileBufferIO* fb = (FileBufferIO*)malloc(sizeof(FileBufferIO));
     fb->fp = fopen(filename, modes);
@@ -128,6 +136,8 @@ FileBufferIO* FileBufferIO_open(const char* filename, const char* modes, size_t 
     fb->bit_p = -1;
     fb->readbits = readbits;
     fb->writebits = writebits;
+    fb->readbytes = readbytes;
+    fb->writebytes = writebytes;
     return fb;
 }
 

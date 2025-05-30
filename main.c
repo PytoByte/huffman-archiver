@@ -71,7 +71,6 @@ void command_compress(int argc, char** argv, char* out_file) {
     }
     
     if (!out_file) out_file = "archive.huff";
-    printf("Compressing %d files to %s\n", argc, out_file);
     compress(argc, argv, out_file);
 }
 

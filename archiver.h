@@ -1,29 +1,16 @@
 // TODO ТРЕБОВАНИЕ К КОДЕРУ
 // ШИФРОВАНИЕ ПО 4КБ (ну или любой другой буфер)
 
-#include <stdio.h>
-
-#include <stdlib.h>
-#include <limits.h>
-
-#include "minheap.h"
-#include "buffio.h"
-
 #define BUFFER_SIZE 4096
 
 typedef struct {
+    int count;
+    int current;
     char* name;
-
-    unsigned long size_pos; // Нужно для перезаписи после бронировнаия места
     unsigned long long size;
     unsigned int treesize;
-} FileInfo;
-
-typedef struct {
-    int count;
-    size_t total_size;
-    FileInfo* files_info;
-} FilesInfo;
+    unsigned long long filestart;
+} FileFrame;
 
 typedef struct {
     unsigned char* code;
