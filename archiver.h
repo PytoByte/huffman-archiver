@@ -12,6 +12,20 @@
 #define BUFFER_SIZE 4096
 
 typedef struct {
+    char* name;
+
+    unsigned long size_pos; // Нужно для перезаписи после бронировнаия места
+    unsigned long long size;
+    unsigned int treesize;
+} FileInfo;
+
+typedef struct {
+    int count;
+    size_t total_size;
+    FileInfo* files_info;
+} FilesInfo;
+
+typedef struct {
     unsigned char* code;
     int size;
 } Code;

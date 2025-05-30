@@ -6,12 +6,38 @@
 #include <stdlib.h>
 #include <limits.h>
 #include <string.h>
+#include <sys/stat.h>
 
 #include "minheap.h"
 #include "buffio.h"
 #include "archiver.h"
 
 #define BUFFER_SIZE 4096
+
+static char check_file_exist(char* filepath) {
+    struct stat buffer;
+    int exist = stat(filepath, &buffer);
+    return exist == 0;
+}
+
+static long long get_filesize(char* filepath) {
+    struct stat buffer;
+    int exist = stat(filepath, &buffer);
+    if (exist != 0) {
+        return -1;
+    }
+    return (long long)buffer.st_size;
+}
+
+static char* get_filename(char* filepath) {
+    char* filename = strrchr(filepath, '/');
+    if (filename == NULL)
+        filename = strrchr(filepath, '\\'); // Для Windows путей
+    if (filename == NULL)
+        return filepath; // Если разделителей нет, вернуть весь путь
+
+    return filename + 1; // Пропустить сам разделитель
+}
 
 static void logwait(char* msg) {
     printf("%s\n", msg);
@@ -31,7 +57,7 @@ static void printbin(unsigned char num, unsigned int size) {
 // codes - список кодов (заполняется)
 // curcode - текущий код
 // codesize - размер текущего кода в битах
-static void build_codes_reqursion(HuffmanNode* tree, Code* codes, unsigned char* curcode, int codesize) {
+static void Codes_build_reqursion(HuffmanNode* tree, Code* codes, unsigned char* curcode, int codesize) {
     if (tree->left == NULL && tree->right == NULL) {
         unsigned int codesize_bytes = codesize / 8 + (codesize % 8 > 0);
         codes[tree->byte].size = codesize;
@@ -40,11 +66,11 @@ static void build_codes_reqursion(HuffmanNode* tree, Code* codes, unsigned char*
             codes[tree->byte].code[i] = curcode[i];
         }
     } else {
-        build_codes_reqursion(tree->left, codes, curcode, codesize + 1);
+        Codes_build_reqursion(tree->left, codes, curcode, codesize + 1);
         unsigned int lastbyte = codesize / 8;
         unsigned char lastbit = codesize % 8;
         curcode[lastbyte] += 1 << (7 - lastbit);
-        build_codes_reqursion(tree->right, codes, curcode, codesize + 1);
+        Codes_build_reqursion(tree->right, codes, curcode, codesize + 1);
         curcode[lastbyte] -= 1 << (7 - lastbit);
     }
 }
@@ -53,19 +79,19 @@ static void build_codes_reqursion(HuffmanNode* tree, Code* codes, unsigned char*
 // tree - дерево
 // wordsize - длина слова байтах
 // ! Возвращаемое значение требует очистки !
-static Codes build_codes(HuffmanNode* tree, size_t wordsize) {
+static Codes Codes_build(HuffmanNode* tree, size_t wordsize) {
     Codes codes;
     codes.size = 1 << (wordsize*8);
     codes.codes = (Code*)calloc(codes.size, sizeof(Code));
     unsigned char* curcode = (unsigned char*)calloc(2<<(wordsize*8 - 3), 1);
 
-    build_codes_reqursion(tree, codes.codes, curcode, 0);
+    Codes_build_reqursion(tree, codes.codes, curcode, 0);
     free(curcode);
 
     return codes;
 }
 
-void codes_free(Codes codes) {
+void Codes_free(Codes codes) {
     free(codes.codes);
 }
 
@@ -125,28 +151,6 @@ static void printcodes(Codes codes) {
     }
 }
 
-static long long get_filesize(FILE* fp) {
-    fseek(fp, 0L, SEEK_END);
-    long size = ftell(fp);
-    fseek(fp, 0L, SEEK_SET);
-    return (long long)size;
-}
-
-typedef struct {
-    char* filename;
-    unsigned long name_pos;
-    unsigned long long filesize;
-    unsigned int treesize;
-    unsigned long size_pos;
-} FileInfo;
-
-typedef struct {
-    int files_count;
-    size_t total_size;
-    unsigned long files_start;
-    FileInfo* files_info;
-} FilesInfo;
-
 void archive_write_filesize(FileBufferIO* file_archive, FileInfo file_info, unsigned long long filesize, unsigned int treesize) {
     long original_pos = ftell(file_archive->fp);
     fseek(file_archive->fp, file_info.size_pos, SEEK_SET);
@@ -155,38 +159,41 @@ void archive_write_filesize(FileBufferIO* file_archive, FileInfo file_info, unsi
     fseek(file_archive->fp, original_pos, SEEK_SET);
 }
 
-FilesInfo prepare_archive(FileBufferIO* file_archive, int* files_count, char** filenames) {
+FilesInfo prepare_archive(FileBufferIO* file_archive, int files_count, char** filepaths) {
     FilesInfo files_info;
     files_info.total_size = 0;
-    files_info.files_info = (FileInfo*)malloc(sizeof(FileInfo)*(*files_count));
+    files_info.count = 0;
+    files_info.files_info = (FileInfo*)malloc(sizeof(FileInfo)*(files_count));
 
-    file_archive->writebits(file_archive, files_count, 0, sizeof(*files_count)*8);
+    file_archive->writebits(file_archive, &files_count, 0, sizeof(files_count)*8);
 
     unsigned long long filesize_default = 0;
     unsigned int treesize_default = 0;
     
-    for (int i = 0; i < *files_count; i++) {
-        char* filename = filenames[i];
-        FILE* fp = fopen(filename, "rb");
-        unsigned long long filesize = get_filesize(fp);
-        /*if (filesize < 512) {
+    for (int i = 0; i < files_count; i++) {
+        FILE* fp = fopen(filepaths[i], "rb");
+
+        char* filename = get_filename(filepaths[i]);
+        long long filesize = get_filesize(filepaths[i]);
+        if (filesize < 512) {
             printf("WARNING \"%s\" (%lld bytes)\n", filename, filesize);
             printf("File too small, it may be bigger after compressing\n");
-            printf("Skip this file? (y/n)\n");
+            printf("Skip this file? (y/n) ");
             if (getchar() == 'y') {
-                filenames[i][0] =  '\0';
-                *files_count--;
+                filepaths[i][0] =  '\0';
                 printf("\n");
                 continue;
             };
             printf("\n");
-        }*/
+        }
 
         files_info.total_size += filesize;
-
-        files_info.files_info[i].name_pos = file_archive->byte_p+1;
+        files_info.count++;
 
         int filename_len = (strlen(filename)+1);
+        files_info.files_info[i].name = (char*)malloc(filename_len);
+        strcpy(files_info.files_info[i].name, filename);
+
         file_archive->writebits(file_archive, &filename_len, 0, sizeof(filename_len)*8);
         file_archive->writebits(file_archive, filename, 0, filename_len*8);
 
@@ -197,9 +204,10 @@ FilesInfo prepare_archive(FileBufferIO* file_archive, int* files_count, char** f
     }
     writebuffer(file_archive);
 
+    // Обновление количества фалов
     long original_pos = ftell(file_archive->fp);
     fseek(file_archive->fp, 0, SEEK_SET);
-    fwrite(files_count, sizeof(*files_count), 1, file_archive->fp);
+    fwrite(&files_info.count, sizeof(files_info.count), 1, file_archive->fp);
     fseek(file_archive->fp, original_pos, SEEK_SET);
 
     return files_info;
@@ -207,44 +215,43 @@ FilesInfo prepare_archive(FileBufferIO* file_archive, int* files_count, char** f
 
 FilesInfo get_files_info(FileBufferIO* file_archive) {
     FilesInfo files_info;
-    files_info.files_count = 0;
-    file_archive->readbits(file_archive, &files_info.files_count, 0, sizeof(files_info.files_count)*8);
-    files_info.files_info = (FileInfo*)malloc(sizeof(FileInfo)*files_info.files_count);
-    for (int i = 0; i < files_info.files_count; i++) {
+    files_info.count = 0;
+    file_archive->readbits(file_archive, &files_info.count, 0, sizeof(files_info.count)*8);
+    files_info.files_info = (FileInfo*)malloc(sizeof(FileInfo)*files_info.count);
+    for (int i = 0; i < files_info.count; i++) {
         int filename_len = 0;
-        file_archive->readbits(file_archive, &filename_len, 0,sizeof(filename_len)*8);
-        files_info.files_info[i].filename = (char*)malloc(filename_len);
+        file_archive->readbits(file_archive, &filename_len, 0, sizeof(filename_len)*8);
+        files_info.files_info[i].name = (char*)malloc(filename_len);
 
-        file_archive->readbits(file_archive, &files_info.files_info[i].filename, 0, filename_len*8);
-        file_archive->readbits(file_archive, &files_info.files_info[i].filesize, 0, sizeof(files_info.files_info[i].filesize)*8);
+        file_archive->readbits(file_archive, files_info.files_info[i].name, 0, filename_len*8);
+        file_archive->readbits(file_archive, &files_info.files_info[i].size, 0, sizeof(files_info.files_info[i].size)*8);
         file_archive->readbits(file_archive, &files_info.files_info[i].treesize, 0, sizeof(files_info.files_info[i].treesize)*8);
-        files_info.files_start = file_archive->byte_p;
     }
 
     return files_info;
 }
 
-void compress(int files_count, char** filenames, char* archivename) {
+void free_files_info(FilesInfo files_info) {
+    for (int i = 0; i < files_info.count; i++) {
+        free(files_info.files_info[i].name);
+    }
+    free(files_info.files_info);
+}
+
+void compress(int files_count, char** filepaths, char* archivepath) {
     printf("Compressing starting\n\n");
-    FileBufferIO* file_archive = FileBufferIO_open(archivename, "wb", BUFFER_SIZE);
-    FilesInfo files_info = prepare_archive(file_archive, &files_count, filenames);
-    unsigned long long files_size_total = files_info.total_size;
-
-    //FileBufferIO_close(file_archive);
-    //return;
-
-    printf("Files count: %d\n", files_count);
-    printf("Size before compress: %lld\n\n", files_size_total);
+    FileBufferIO* file_archive = FileBufferIO_open(archivepath, "wb", BUFFER_SIZE);
+    FilesInfo files_info = prepare_archive(file_archive, files_count, filepaths);
 
     int file_num = 0;
     for (int i = 0; i < files_count; i++) {
-        char* filename = filenames[i];
-        if (strlen(filename) == 0) {
+        char* filename = files_info.files_info[i].name;
+        if (filename == NULL) {
             continue;
         }
+        long long filesize = get_filesize(filepaths[i]);
 
         FileBufferIO* file_compress = FileBufferIO_open(filename, "rb", BUFFER_SIZE);
-        long long filesize = get_filesize(file_compress->fp);
     
         // Подсчёт частоты символов
         unsigned long long freqs[256] = {0};
@@ -267,8 +274,7 @@ void compress(int files_count, char** filenames, char* archivename) {
         MinHeap_free(heap);
     
         // Кодировка по дереву
-        Codes codes = build_codes(tree, 1);
-        printcodes(codes);
+        Codes codes = Codes_build(tree, 1);
     
         // Сжатие файла
         rewind(file_compress->fp);
@@ -284,7 +290,7 @@ void compress(int files_count, char** filenames, char* archivename) {
         while (file_compress->readbits(file_compress, &byte, 0, sizeof(byte)*8)) {
             compress_filesize += file_archive->writebits(file_archive, codes.codes[byte].code, 0, codes.codes[byte].size);
         }
-        codes_free(codes);
+        Codes_free(codes);
         
         FileBufferIO_close(file_compress); // Файл сжат
 
@@ -292,11 +298,16 @@ void compress(int files_count, char** filenames, char* archivename) {
     
         printf("\"%s\" compress result:\n", filename);
         printf("File size: %lld bytes\n", filesize);
-        printf("Compressed file size %lld bytes\n\n", compress_filesize/8);       
+        printf("Compressed file size %lld bytes\n\n", compress_filesize/8);    
     }
+
     FileBufferIO_close(file_archive);
 
-    printf("Saved in %s\n", archivename); 
+    printf("Files compressed: %d\n", files_info.count);
+    printf("Size before compress: %ld bytes\n", files_info.total_size);
+    printf("Size after compress: %lld bytes\n", get_filesize(archivepath));
+
+    printf("Saved in %s\n", archivepath); 
 }
 
 void decompress(char* dir, char* archivename) {
@@ -304,16 +315,16 @@ void decompress(char* dir, char* archivename) {
 
     FilesInfo files_info = get_files_info(file_archive);
 
-    for (int i = 0; i < files_info.files_count; i++) {
+    for (int i = 0; i < files_info.count; i++) {
         //FileBufferIO* file_decompress = FileBufferIO_open(files_info.files_info[i].filename, "wb", BUFFER_SIZE);
-        FileBufferIO* file_decompress = FileBufferIO_open("demo.txt", "wb", BUFFER_SIZE);
-        unsigned long long compress_size = files_info.files_info[i].filesize; // Размер сжатого файла в байтах
-        unsigned int compress_treesize = files_info.files_info[i].treesize;  // Используемые биты в последнем байте (хвосте)
+        char* filename = (char*)malloc(strlen(dir) + strlen(files_info.files_info[i].name) + 2 + i);
+        sprintf(filename, "%s/%d%s", dir, i, files_info.files_info[i].name);
+        printf("%s\n", filename);
+        FileBufferIO* file_decompress = FileBufferIO_open(filename, "wb", BUFFER_SIZE);
+        unsigned long long compress_size = files_info.files_info[i].size; // Размер сжатого файла в байтах
+        unsigned int compress_treesize = files_info.files_info[i].treesize;  // Размер дерева в битах
 
         HuffmanNode* tree = fread_tree(file_archive);
-        Codes codes = build_codes(tree, 1);
-        printcodes(codes);
-        codes_free(codes);
 
         HuffmanNode* node_cur = tree;
         for (unsigned long long i = 0; i < compress_size - compress_treesize; i++) {
