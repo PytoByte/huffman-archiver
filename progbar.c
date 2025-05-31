@@ -7,6 +7,8 @@ static unsigned long long limit;
 static unsigned long long value;
 
 static void pg_print() {
+    int fill_count = 20;
+
     printf("\r");
     int percent = (100*value) / limit;
     if (percent < 0) {
@@ -14,13 +16,13 @@ static void pg_print() {
     } else if (percent > 100) {
         percent = 100;
     }
-    int fill = percent/10;
+    int fill = (fill_count * percent) / 100;
 
     printf("[");
     for (int j = 0; j < fill; j++) {
         printf("=");
     }
-    for (int j = 0; j < 10 - fill; j++) {
+    for (int j = 0; j < fill_count - fill; j++) {
         printf("-");
     }
     printf("] %3d%%", percent);

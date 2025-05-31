@@ -70,7 +70,7 @@ void command_compress(int argc, char** argv, char* out_file) {
         return;
     }
     
-    if (!out_file) out_file = "ar.huff";
+    if (!out_file) out_file = "ar.huf";
     if (compress(argc, argv, out_file) != 0) {
         fprintf(stderr, "Compression canceled\n");
     }

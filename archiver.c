@@ -47,6 +47,68 @@ static char* get_filename(char* filepath) {
 
     return filename + 1; // Пропустить сам разделитель
 }
+
+// ! Возвращаемое значение очистить !
+char* generate_unique_filepath(const char* path_old) {
+    // Если файл не существует, возвращаем оригинальный путь
+    char* path = (char*)malloc(strlen(path_old)+1);
+    strcpy(path, path_old);
+
+    if (!check_file_exist(path)) {
+        return path;
+    }
+
+    // Разбираем имя файла и расширение
+    char* dot_pos = strrchr(get_filename(path), '.');
+
+    char* ext = NULL;
+    if (dot_pos) {
+        ext = (char*)malloc(strlen(dot_pos)+1);
+        if (!ext) {
+            fprintf(stderr, "Out of memory\n");
+            free(path);
+            return NULL;
+        }
+        strcpy(ext, dot_pos);
+        dot_pos[0] = 0;
+    }
+    
+    char* name = (char*)malloc(strlen(path)+1);
+    if (!name) {
+        fprintf(stderr, "Out of memory\n");
+        free(path);
+        if (ext) free(ext);
+        return NULL;
+    }
+    strcpy(name, path);
+
+    // Генерируем новые имена с добавлением "(n)"
+    unsigned int addition_num = 1;
+    do {
+        int ext_len = 0;
+        if (ext) ext_len = strlen(ext);
+        path = realloc(path, strlen(name) + ext_len + digits_count(addition_num) + 6);
+        if (!path) {
+            fprintf(stderr, "Out of memory\n");
+            free(name);
+            if (ext) free(ext);
+            free(path);
+            return NULL;
+        };
+
+        if (ext) {
+            sprintf(path, "%s (%u)%s", name, addition_num, ext);
+        } else {
+            sprintf(path, "%s (%u)", name, addition_num);
+        }
+        addition_num++;
+    } while (check_file_exist(path));
+
+    free(name);
+    if (ext) free(ext);
+
+    return path;
+}
 // == Работа с файлами ===========================
 
 
@@ -191,30 +253,32 @@ static HuffmanNode* fread_tree(FileBufferIO* stream_read, unsigned int treesize,
 // == Чтение и запись дерева (префиксная форма) ==
 
 
+
 // == Подготовка архива ==========================
 long prepare_file(FileBufferIO* archive, char* path) {
-    long size_pos = 0;
+   long size_pos = 0;
 
-    if (strncmp(path, "./", 2) == 0) {
-        path += 2;
-    }
+   if (strncmp(path, "./", 2) == 0) {
+       path += 2;
+   }
 
-    unsigned int filename_len = strlen(path)+1;
-    unsigned long long compressed_filesize = 0;
-    unsigned int compressed_treesize = 0;
-    unsigned long long filestart = 0;
+   unsigned int filename_len = strlen(path)+1;
+   unsigned long long compressed_filesize = 0;
+   unsigned int compressed_treesize = 0;
+   unsigned long long filestart = 0;
 
-    archive->writebytes(archive, &filename_len, 0, sizeof(filename_len));
-    archive->writebytes(archive, path, 0, filename_len);
-    size_pos = ftell(archive->fp);
-    if (size_pos == -1) return -1;
-    size_pos = (size_pos + archive->byte_p) + 1;
-    archive->writebytes(archive, &compressed_filesize, 0, sizeof(compressed_filesize));
-    archive->writebytes(archive, &compressed_treesize, 0, sizeof(compressed_treesize));
-    archive->writebytes(archive, &filestart, 0, sizeof(filestart));
+   archive->writebytes(archive, &filename_len, 0, sizeof(filename_len));
+   archive->writebytes(archive, path, 0, filename_len);
+   size_pos = ftell(archive->fp);
+   if (size_pos == -1) return -1;
+   size_pos = (size_pos + archive->byte_p) + 1;
+   archive->writebytes(archive, &compressed_filesize, 0, sizeof(compressed_filesize));
+   archive->writebytes(archive, &compressed_treesize, 0, sizeof(compressed_treesize));
+   archive->writebytes(archive, &filestart, 0, sizeof(filestart));
 
-    return size_pos;
+   return size_pos;
 }
+
 
 int prepare_allfiles(FileBufferIO* archive, hlist* list, char* startpath, char* addpath) {
     char* path = (char*)malloc(strlen(startpath) + strlen(addpath) + 1);
@@ -230,7 +294,7 @@ int prepare_allfiles(FileBufferIO* archive, hlist* list, char* startpath, char* 
 
     if (S_ISREG(file_stat.st_mode)) {
         size_t filesize = get_filesize(path);
-        /*if (filesize < 512) {
+        if (filesize < 512) {
             printf("WARNING \"%s\" (%ld bytes)\n", get_filename(path), filesize);
             printf("File too small, it may be bigger after compressing\n");
             printf("Skip this file? (y/n) ");
@@ -239,11 +303,12 @@ int prepare_allfiles(FileBufferIO* archive, hlist* list, char* startpath, char* 
                 return 0;
             };
             printf("\n");
-        }*/
+        }
 
         if (strlen(addpath) == 0) {
             long size_pos = prepare_file(archive, get_filename(startpath));
             if (size_pos == -1) {
+                free(path);
                 fprintf(stderr, "Getting file position error\n");
                 return -1;
             }
@@ -251,18 +316,21 @@ int prepare_allfiles(FileBufferIO* archive, hlist* list, char* startpath, char* 
         } else {
             char* rootdir = get_filename(startpath);
             char* filepath = (char*)malloc(strlen(rootdir) + strlen(addpath) + 1);
-            if (filepath) {
-                
+            if (!filepath) {
+                fprintf(stderr, "Out of memory\n");
+                free(path);
+                return -1;
             }
             strcpy(filepath, rootdir);
             strcat(filepath, addpath);
             long size_pos = prepare_file(archive, filepath);
+            free(filepath);
             if (size_pos == -1) {
+                free(path);
                 fprintf(stderr, "Getting file position error\n");
                 return -1;
             }
             addtolist(list, path, size_pos);
-            free(filepath);
         }
         free(path);
         return 1;
@@ -446,7 +514,7 @@ char next_fileframe(FileFrame* fileframe, FileBufferIO* archive) {
 
     unsigned int filename_len = 0;
     archive->readbytes(archive, &filename_len, 0, sizeof(filename_len));
-    fileframe->name = (char*)malloc(filename_len);
+    fileframe->name = (char*)calloc(filename_len, 1);
     if (fileframe->name == NULL) {
         fprintf(stderr, "Out of memory\n");
         return 0;
@@ -457,16 +525,19 @@ char next_fileframe(FileFrame* fileframe, FileBufferIO* archive) {
         end_fileframe(fileframe);
         return 0;
     }
+    fileframe->size = 0;
     if (!archive->readbytes(archive, &fileframe->size, 0, sizeof(fileframe->size))) {
         fprintf(stderr, "EOF while reading headers\n");
         end_fileframe(fileframe);
         return 0;
     }
+    fileframe->treesize = 0;
     if (!archive->readbytes(archive, &fileframe->treesize, 0, sizeof(fileframe->treesize))) {
         fprintf(stderr, "EOF while reading headers\n");
         end_fileframe(fileframe);
         return 0;
     }
+    fileframe->filestart = 0;
     if (!archive->readbytes(archive, &fileframe->filestart, 0, sizeof(fileframe->filestart))) {
         fprintf(stderr, "EOF while reading headers\n");
         end_fileframe(fileframe);
@@ -553,17 +624,21 @@ FileSize compress_file(FileBufferIO* archive, char* path, long long size_pos) {
 }
 
 int compress(int paths_c, char** paths, char* archivepath) {
-    FileBufferIO* archive = FileBufferIO_open(archivepath, "wb", BUFFER_SIZE);
+    char* unique_archivepath = generate_unique_filepath(archivepath);
+    FileBufferIO* archive = FileBufferIO_open(unique_archivepath, "wb", BUFFER_SIZE);
     if (!archive) {
+        free(unique_archivepath);
         return 1;
     }
     CompressingFiles compr_files = prepare_archive(archive, paths_c, paths);
 
     if (compr_files.files == NULL) {
+        free(unique_archivepath);
         FileBufferIO_close(archive);
         return 1;
     } else if (compr_files.files_c == 0) {
         fprintf(stderr, "Empty archive\n");
+        free(unique_archivepath);
         freelist(compr_files.files);
         FileBufferIO_close(archive);
         return 1;
@@ -577,6 +652,7 @@ int compress(int paths_c, char** paths, char* archivepath) {
         FileSize filesize = compress_file(archive, cur->path, cur->size_pos);
         if (filesize.compressed == 0) {
             pg_end();
+            free(unique_archivepath);
             fprintf(stderr, "Error while compressing %s\n", cur->path);
             return 1;
         }
@@ -589,8 +665,9 @@ int compress(int paths_c, char** paths, char* archivepath) {
 
     FileBufferIO_close(archive);
 
-    printf("Result: %lld -> %ld bytes\n", filesize_total.original, get_filesize(archivepath));
-    printf("Saved in %s\n", archivepath);
+    printf("Result: %lld -> %ld bytes\n", filesize_total.original, get_filesize(unique_archivepath));
+    printf("Saved in %s\n", unique_archivepath);
+    free(unique_archivepath);
     return 0;
 }
 // == Сжатие файлов ==============================
@@ -603,7 +680,7 @@ int create_directories(const char *path) {
     char* temp = (char*)malloc(strlen(path)+1);
     if (!temp) {
         fprintf(stderr, "Out of memory");
-        return -1;
+        return 1;
     }
     strncpy(temp, path, sizeof(temp));
 
@@ -614,7 +691,7 @@ int create_directories(const char *path) {
             if (mkdir(temp, 0777) == -1 && errno != EEXIST) {
                 perror("mkdir");
                 free(temp);
-                return -1;
+                return 1;
             }
             *sp = '/';
         }
@@ -623,71 +700,6 @@ int create_directories(const char *path) {
 
     free(temp);
     return 0;
-}
-
-// ! Возвращаемое значение очистить !
-char* generate_unique_filepath(char* path_old) {
-    // Если файл не существует, возвращаем оригинальный путь
-    char* path = (char*)malloc(strlen(path_old)+1);
-    strcpy(path, path_old);
-
-    if (!check_file_exist(path)) {
-        return path;
-    }
-
-    // Разбираем имя файла и расширение
-    char* dot_pos = strrchr(path, '.');
-    if (dot_pos == path) {
-        dot_pos = strrchr(path+1, '.');
-    }
-    
-    char* ext = NULL;
-    if (dot_pos) {
-        ext = (char*)malloc(strlen(dot_pos)+1);
-        if (!ext) {
-            fprintf(stderr, "Out of memory\n");
-            free(path);
-            return NULL;
-        }
-        strcpy(ext, dot_pos);
-        dot_pos[0] = 0;
-    }
-
-    char* name = (char*)malloc(strlen(path)+1);
-    if (!name) {
-        fprintf(stderr, "Out of memory\n");
-        free(path);
-        if (ext) free(ext);
-        return NULL;
-    }
-    strcpy(name, path);
-
-    // Генерируем новые имена с добавлением "(n)"
-    unsigned int addition_num = 1;
-    do {
-        int ext_len = 0;
-        if (ext) ext_len = strlen(ext);
-        path = realloc(path, strlen(name) + ext_len + digits_count(addition_num) + 6);
-        if (!path) {
-            fprintf(stderr, "Out of memory\n");
-            free(name);
-            if (ext) free(ext);
-            free(path);
-            return NULL;
-        };
-
-        if (ext) {
-            sprintf(path, "%s (%u)%s", name, addition_num, ext);
-        } else {
-            sprintf(path, "%s (%u)", name, addition_num);
-        }
-        addition_num++;
-    } while (check_file_exist(path));
-
-    free(name);
-    if (ext) free(ext);
-
-    return path;
 }
 
 int decompress(char* dir, char* archivename) {
@@ -707,7 +719,7 @@ int decompress(char* dir, char* archivename) {
         return 1;
     }
 
-    //pg_init(fileframe.count, 0);
+    pg_init(fileframe.count, 0);
     do {
         int fs = fseek(archive->fp, fileframe.filestart / 8, SEEK_SET);
         if (fs != 0) {
@@ -718,6 +730,7 @@ int decompress(char* dir, char* archivename) {
             FileBufferIO_close(archive_frame);
             return 1;
         }
+
         nextbuffer(archive);
         archive->bit_p = fileframe.filestart % 8;
 
@@ -731,7 +744,7 @@ int decompress(char* dir, char* archivename) {
             return 1;
         }
         sprintf(path, "%s/%s", dir, fileframe.name);
-        if (create_directories(path) == -1) {
+        if (create_directories(path) != 0) {
             pg_end();
             free(path);
             end_fileframe(&fileframe);
@@ -752,6 +765,7 @@ int decompress(char* dir, char* archivename) {
         FileBufferIO* file_decompress = FileBufferIO_open(unique_path, "wb", BUFFER_SIZE);
         if (!file_decompress) {
             pg_end();
+            free(unique_path);
             end_fileframe(&fileframe);
             FileBufferIO_close(archive);
             FileBufferIO_close(archive_frame);
@@ -790,6 +804,17 @@ int decompress(char* dir, char* archivename) {
             } else if (bit==1) {
                 node_cur = node_cur->right;
             }
+
+            if (!node_cur) {
+                pg_end();
+                fprintf(stderr, "Corrupted huffman tree\n");
+                end_fileframe(&fileframe);
+                FileBufferIO_close(archive);
+                FileBufferIO_close(archive_frame);
+                FileBufferIO_close(file_decompress);
+                HuffmanNode_freetree(tree);
+                return 1;
+            }
             
             if (node_cur->left==NULL && node_cur->right==NULL) {
                 file_decompress->writebytes(file_decompress, &node_cur->byte, 0, sizeof(node_cur->byte));
@@ -799,7 +824,7 @@ int decompress(char* dir, char* archivename) {
 
         HuffmanNode_freetree(tree);
         FileBufferIO_close(file_decompress);
-        //pg_update(1);
+        pg_update(1);
     } while (next_fileframe(&fileframe, archive_frame));
 
     FileBufferIO_close(archive);

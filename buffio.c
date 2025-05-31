@@ -20,12 +20,18 @@ void nextbuffer(FileBufferIO* self) {
 size_t writebuffer(FileBufferIO* self) {
     if (self->byte_p==0 && self->bit_p==0) return 0;
 
-    size_t wrote_bits_count = fwrite(self->buffer, 1, self->byte_p+(self->bit_p>0), self->fp);
+    int write_bytes = self->byte_p+(self->bit_p>0);
+    if (write_bytes > self->buffer_size) {
+        fprintf(stderr, "WARNING! bytes to write out of buffer size\n");
+        write_bytes = self->buffer_size;
+    }
+
+    size_t wrote_bytes_count = fwrite(self->buffer, 1, write_bytes, self->fp);
     self->byte_p = 0;
     self->bit_p = 0;
 
     memset(self->buffer, 0, self->buffer_size);
-    return wrote_bits_count;
+    return wrote_bytes_count;
 }
 
 static size_t readbits(FileBufferIO* self, const void* ptr, unsigned long long startbit, size_t count) {
@@ -34,14 +40,14 @@ static size_t readbits(FileBufferIO* self, const void* ptr, unsigned long long s
     char* src = (char*)ptr;
     unsigned long long src_pointer = startbit;
 
-    src[0] = 0;
+    src[src_pointer / 8] = 0;
 
     while (count > readed_bits_count_total) {
         unsigned char src_bit = src_pointer % 8;
         unsigned long src_byte = src_pointer / 8;
 
         // Читаю новый буфер, если данные закончились
-        if (self->byte_p >= self->buffer_readspace) nextbuffer(self);
+        if (self->byte_p+(self->bit_p/8) >= self->buffer_readspace) nextbuffer(self);
         if (self->buffer_readspace == 0) break;
 
         unsigned char reading_bits = self->buffer[self->byte_p] << self->bit_p;
@@ -79,7 +85,7 @@ static size_t writebits(FileBufferIO* self, const void* ptr, unsigned long long 
     unsigned long long src_pointer = startbit;
 
     // Перед началом цикла надо проверить не переполнен ли буфер
-    if (self->byte_p >= self->buffer_size) writebuffer(self);
+    if (self->byte_p+(self->bit_p/8) >= self->buffer_size) writebuffer(self);
 
     while (count > wrote_bits_count_total) {
         unsigned char src_bit = src_pointer % 8;
@@ -105,7 +111,8 @@ static size_t writebits(FileBufferIO* self, const void* ptr, unsigned long long 
         if (avaiable_to_write < writing_bits_count) {
             unsigned char remain_bits_count = (writing_bits_count - avaiable_to_write); // Сколько бит не записалось
             self->byte_p++; // Запишу в следующий байт
-            if (self->byte_p >= self->buffer_size) writebuffer(self); // Но сначала проверю что буфер не заполнен
+            self->bit_p = 0;
+            if (self->byte_p+(self->bit_p/8) >= self->buffer_size) writebuffer(self); // Но сначала проверю что буфер не заполнен
             self->bit_p = remain_bits_count;
             self->buffer[self->byte_p] = writing_bits << (writing_bits_count - remain_bits_count);
         } else {
@@ -148,8 +155,14 @@ FileBufferIO* FileBufferIO_open(const char* filename, const char* modes, size_t 
     }
     fb->buffer_size = buffer_size;
     fb->buffer_readspace = 0;
-    fb->byte_p = -1;
-    fb->bit_p = -1;
+
+    if (strchr(fb->modes, 'w')) {
+        fb->byte_p = 0;
+        fb->bit_p = 0;
+    } else {
+        fb->byte_p = -1;
+        fb->bit_p = -1;
+    }
     fb->readbits = readbits;
     fb->writebits = writebits;
     fb->readbytes = readbytes;
