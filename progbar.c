@@ -3,9 +3,12 @@
 
 #include "progbar.h"
 
-static void pg_print(ProgressBar* progress_bar) {
+static unsigned long long limit;
+static unsigned long long value;
+
+static void pg_print() {
     printf("\r");
-    int percent = (100*progress_bar->value) / progress_bar->limit;
+    int percent = (100*value) / limit;
     if (percent < 0) {
         percent = 0;
     } else if (percent > 100) {
@@ -24,27 +27,24 @@ static void pg_print(ProgressBar* progress_bar) {
     fflush(stdout);
 }
 
-void pg_update(ProgressBar* progress_bar, long long delta) {
-    progress_bar->value += delta;
-    pg_print(progress_bar);
+void pg_update(long long delta) {
+    value += delta;
+    pg_print();
 }
 
-void pg_set(ProgressBar* progress_bar, long long value) {
-    progress_bar->value = value;
-    pg_print(progress_bar);
+void pg_set(long long new_value) {
+    value = new_value;
+    pg_print();
 }
 
-ProgressBar* pg_init(long long limit, long long start_value) {
-    ProgressBar* progress_bar = (ProgressBar*)malloc(sizeof(ProgressBar));
-    progress_bar->limit = limit;
-    progress_bar->value = start_value;
-    pg_print(progress_bar);
-    return progress_bar;
+void pg_init(long long lim, long long start_value) {
+    limit = lim;
+    value = start_value;
+    pg_print();
 }
 
-void pg_end(ProgressBar* progress_bar) {
-    progress_bar->value = progress_bar->limit;
-    pg_print(progress_bar);
-    free(progress_bar);
+void pg_end() {
+    value = limit;
+    pg_print();
     printf("\n");
 }

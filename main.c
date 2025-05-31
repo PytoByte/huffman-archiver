@@ -48,7 +48,7 @@ typedef struct {
 
 // Доступные команды
 const Command commands[] = {
-    {"help", NULL, "Show help information", "[command]"},
+    {"help", NULL, "Show help information", ""},
     {"compress", command_compress, "Compress files", "file1 [file2...] -o output"},
     {"decompress", command_decompress, "Decompress archive", "archive -o output_dir"},
     {NULL, NULL, NULL, NULL} // Маркер конца
@@ -70,8 +70,10 @@ void command_compress(int argc, char** argv, char* out_file) {
         return;
     }
     
-    if (!out_file) out_file = "archive.huff";
-    compress(argc, argv, out_file);
+    if (!out_file) out_file = "ar.huff";
+    if (compress(argc, argv, out_file) != 0) {
+        fprintf(stderr, "Compression canceled\n");
+    }
 }
 
 void command_decompress(int argc, char** argv, char* out_dir) {
@@ -82,9 +84,10 @@ void command_decompress(int argc, char** argv, char* out_dir) {
 
     char* archive_file = argv[0];
     if (!out_dir) out_dir = ".";
-    
-    printf("Decompressing %s to %s\n", archive_file, out_dir);
-    decompress(out_dir, archive_file);
+
+    if (decompress(out_dir, archive_file) != 0) {
+        fprintf(stderr, "Decompression canceled\n");
+    }
 }
 
 int parse_options(int argc, char** argv, char** out_file) {

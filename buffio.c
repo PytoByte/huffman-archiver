@@ -127,9 +127,25 @@ static size_t readbytes(FileBufferIO* self, const void* ptr, unsigned long long 
 FileBufferIO* FileBufferIO_open(const char* filename, const char* modes, size_t buffer_size) {
     FileBufferIO* fb = (FileBufferIO*)malloc(sizeof(FileBufferIO));
     fb->fp = fopen(filename, modes);
+    if (fb->fp == NULL) {
+        fprintf(stderr, "Can't open file %s\n", filename);
+        free(fb);
+        return NULL;
+    }
     fb->modes = (char*)malloc(strlen(modes)+1);
+    if (fb->modes == NULL) {
+        fprintf(stderr, "Out of memory\n");
+        free(fb);
+        return NULL;
+    }
     strcpy(fb->modes, modes);
     fb->buffer = (char*)calloc(buffer_size, sizeof(char));
+    if (fb->buffer == NULL) {
+        fprintf(stderr, "Out of memory\n");
+        free(fb);
+        free(fb->modes);
+        return NULL;
+    }
     fb->buffer_size = buffer_size;
     fb->buffer_readspace = 0;
     fb->byte_p = -1;

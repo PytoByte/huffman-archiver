@@ -1,7 +1,6 @@
-// TODO ТРЕБОВАНИЕ К КОДЕРУ
-// ШИФРОВАНИЕ ПО 4КБ (ну или любой другой буфер)
-
 #define BUFFER_SIZE 4096
+
+#include "linkedlist.h"
 
 typedef struct {
     int count;
@@ -13,6 +12,11 @@ typedef struct {
 } FileFrame;
 
 typedef struct {
+    unsigned long long original;
+    unsigned long long compressed;
+} FileSize;
+
+typedef struct {
     unsigned char* code;
     int size;
 } Code;
@@ -22,6 +26,12 @@ typedef struct {
     int size;
 } Codes;
 
-void compress(int files_count, char** filenames, char* archivename);
+typedef struct {
+    hlist* files;
+    int files_c;
+    unsigned long long size;
+} CompressingFiles;
 
-void decompress(char* dir, char* archivename);
+int compress(int files_count, char** filenames, char* archivename);
+
+int decompress(char* dir, char* archivename);
