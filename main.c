@@ -2,15 +2,76 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdarg.h>
-#include <stdbool.h>
 
 #include "archiver.h"
 
-void command_help(char* program_name);
-void command_compress(int argc, char** argv, char* out_file);
-void command_decompress(int argc, char** argv, char* out_dir);
+enum CommandType {
+    HELP = 0,
+    COMPRESS = 1,
+    DECOMPRESS = 2,
+    INVALID_COMMAND,
+    PARSER_ERROR = -1
+};
 
-// Вспомогательные функции
+enum OptionType {
+    OPTION_OUTPUT = 0,
+    OPTION_WORDSIZE = 1,
+    INVALID_OPTION
+};
+
+typedef struct {
+    enum CommandType cmd;
+    char* out;
+    char** files;
+    int files_count;
+    int wordsize;
+} Instruction;
+
+typedef struct Manual {
+    const int aliases_count;
+    const char** aliases;
+    const char* description;
+    const char* usage;
+} Manual;
+
+Manual commands_manual[] = {
+    {2, (const char*[]){"-help", "-h"}, "Show help information", "-help"},
+    {2, (const char*[]){"-compress", "-c"}, "Compress files", "-compress [files|dirs] -output <file>"},
+    {2, (const char*[]){"-decompress", "-d"}, "Decompress files", "-decompress [archives] -output <dir>"},
+    {0, NULL, NULL, NULL}
+};
+
+Manual options_manual[] = {
+    {2, (const char*[]){"-output", "-o"}, "Specify output file or directory", "-output <file|dir>"},
+    {2, (const char*[]){"-word", "-w"}, "Specify word size in bytes (from 1 to 3)", "-word <number>"},
+    {0, NULL, NULL, NULL}
+};
+
+void command_help(char* program_name) {
+    printf("Usage: %s <command> [options] [arguments]\n\n", program_name);
+    printf("Commands:\n");
+    for (int i = 0; commands_manual[i].aliases_count != 0; i++) {
+        printf("  ");
+        for (int j = 0; j < commands_manual[i].aliases_count; j++) {
+            printf("%s ", commands_manual[i].aliases[j]);
+        }
+        printf(" %s\n", commands_manual[i].description);
+        printf("    Usage: %s %s\n", program_name, commands_manual[i].usage);
+        printf("\n");
+    }
+
+    printf("Options:\n");
+    for (int i = 0; options_manual[i].aliases_count != 0; i++) {
+        printf("  ");
+        for (int j = 0; j < options_manual[i].aliases_count; j++) {
+            printf("%s ", options_manual[i].aliases[j]);
+        }
+        printf(" %s\n", options_manual[i].description);
+        printf("    Usage: %s\n", options_manual[i].usage);
+        printf("\n");
+    }
+}
+
 char asciitolower(char c) {
     return (c >= 'A' && c <= 'Z') ? c + ('a' - 'A') : c;
 }
@@ -19,127 +80,169 @@ void strlwr(char* s) {
     for (; *s; s++) *s = asciitolower(*s);
 }
 
-bool check_command(const char* command, int alias_count, ...) {
-    va_list aliases;
-    va_start(aliases, alias_count);
-    
-    char lower_command[256];
-    strncpy(lower_command, command, sizeof(lower_command));
+int check_flag(const char* flag, const char** aliases, int aliases_count) {
+    char* lower_command = (char*)malloc(strlen(flag) + 1);
+    if (!lower_command) {
+        fprintf(stderr, "Memory allocation failed\n");
+        return -1;
+    }
+    strcpy(lower_command, flag);
     strlwr(lower_command);
-    
-    for (int i = 0; i < alias_count; i++) {
-        const char* alias = va_arg(aliases, const char*);
-        if (strcmp(lower_command, alias) == 0) {
-            va_end(aliases);
-            return true;
+
+    for (int i = 0; i < aliases_count; i++) {
+        if (strcmp(lower_command, aliases[i]) == 0) {
+            free(lower_command);
+            return 1;
         }
     }
-    
-    va_end(aliases);
-    return false;
+    free(lower_command);
+    return 0;
 }
 
-typedef struct {
-    const char* name;
-    void (*handler)(int, char**, char*);
-    const char* description;
-    const char* usage;
-} Command;
+Instruction parse_instruction(int argc, char** argv) {
+    Instruction instruction = {INVALID_COMMAND, NULL, NULL, 0, 1};
 
-// Доступные команды
-const Command commands[] = {
-    {"help", NULL, "Show help information", ""},
-    {"compress", command_compress, "Compress files", "file1 [file2...] -o output"},
-    {"decompress", command_decompress, "Decompress archive", "archive -o output_dir"},
-    {NULL, NULL, NULL, NULL} // Маркер конца
-};
-
-void command_help(char* program_name) {
-    printf("Usage: %s <command> [options] [arguments]\n\n", program_name);
-    printf("Available commands:\n");
-    
-    for (const Command* cmd = commands; cmd->name; cmd++) {
-        printf("  %-10s %s\n", cmd->name, cmd->description);
-        if (cmd->usage) printf("    Usage: %s %s %s\n", program_name, cmd->name, cmd->usage);
-    }
-}
-
-void command_compress(int argc, char** argv, char* out_file) {
-    if (argc < 1) {
-        fprintf(stderr, "Error: No input files specified\n");
-        return;
-    }
-    
-    if (!out_file) out_file = "ar.huf";
-    if (compress(argc, argv, out_file) != 0) {
-        fprintf(stderr, "Compression canceled\n");
-    }
-}
-
-void command_decompress(int argc, char** argv, char* out_dir) {
-    if (argc < 1) {
-        fprintf(stderr, "Error: No input files specified\n");
-        return;
+    instruction.files = (char**)malloc(argc * sizeof(char*));
+    if (!instruction.files) {
+        instruction.cmd = PARSER_ERROR;
+        fprintf(stderr, "Memory allocation failed\n");
+        return instruction;
     }
 
-    char* archive_file = argv[0];
-    if (!out_dir) out_dir = ".";
-
-    if (decompress(out_dir, archive_file) != 0) {
-        fprintf(stderr, "Decompression canceled\n");
-    }
-}
-
-int parse_options(int argc, char** argv, char** out_file) {
+    int check = 0;
     for (int i = 0; i < argc; i++) {
-        if (strcmp(argv[i], "-o") == 0 || strcmp(argv[i], "--output") == 0) {
-            if (i + 1 < argc) {
-                *out_file = argv[i + 1];
-                return 2; // Пропускаем обработанные аргументы
-            } else {
-                fprintf(stderr, "Error: Output file not specified\n");
-                return -1;
-            }
+        check = check_flag(argv[i], commands_manual[HELP].aliases, commands_manual[HELP].aliases_count);
+        if (check == 1) {
+            instruction.cmd = HELP;
+            return instruction;
+        } else if (check == -1) {
+            instruction.cmd = PARSER_ERROR;
+            free(instruction.files);
+            return instruction;
         }
+
+        check = check_flag(argv[i], commands_manual[COMPRESS].aliases, commands_manual[COMPRESS].aliases_count);
+        if (check == 1) {
+            if (instruction.cmd != INVALID_COMMAND) {
+                fprintf(stderr, "Only one command can be specified\n");
+                instruction.cmd = PARSER_ERROR;
+                free(instruction.files);
+                return instruction;
+            }
+            instruction.cmd = COMPRESS;
+            continue;
+        } else if (check == -1) {
+            instruction.cmd = PARSER_ERROR;
+            free(instruction.files);
+            return instruction;
+        }
+
+        check = check_flag(argv[i], commands_manual[DECOMPRESS].aliases, commands_manual[DECOMPRESS].aliases_count);
+        if (check == 1) {
+            instruction.cmd = DECOMPRESS;
+            continue;
+        } else if (check == -1) {
+            instruction.cmd = PARSER_ERROR;
+            free(instruction.files);
+            return instruction;
+        }
+
+        check = check_flag(argv[i], options_manual[OPTION_OUTPUT].aliases, options_manual[OPTION_OUTPUT].aliases_count);
+        if (check == 1) {
+            if (argc <= i+1) {
+                fprintf(stderr, "Option %s requires an arguments\n", argv[i]);
+                instruction.cmd = PARSER_ERROR;
+                free(instruction.files);
+                return instruction;
+            }
+            instruction.out = argv[i+1];
+            i += 1;
+            continue;
+        } else if (check == -1) {
+            instruction.cmd = PARSER_ERROR;
+            free(instruction.files);
+            return instruction;
+        }
+
+        check = check_flag(argv[i], options_manual[OPTION_WORDSIZE].aliases, options_manual[OPTION_WORDSIZE].aliases_count);
+        if (check == 1) {
+            if (argc <= i+1) {
+                fprintf(stderr, "Option %s requires an arguments\n", argv[i]);
+                instruction.cmd = PARSER_ERROR;
+                free(instruction.files);
+                return instruction;
+            }
+
+            int parse_wordsize = atoi(argv[i+1]);
+            if (parse_wordsize < 1 || parse_wordsize>3) {
+                fprintf(stderr, "Option %s can take only one of the following values: from 1 to 3\n", argv[i]);
+                instruction.cmd = PARSER_ERROR;
+                free(instruction.files);
+                return instruction;
+            }
+
+            instruction.wordsize = parse_wordsize;
+            i += 1;
+            continue;
+        } else if (check == -1) {
+            instruction.cmd = PARSER_ERROR;
+            free(instruction.files);
+            return instruction;
+        }
+
+        instruction.files[instruction.files_count++] = argv[i];
     }
-    return 0; // Нет опций для пропуска
+
+    return instruction;
 }
 
 int main(int argc, char* argv[]) {
     if (argc < 2) {
-        command_help("huffman");
-        return EXIT_FAILURE;
+        command_help(argv[0]);
+        return 1;
     }
 
-    char* command = argv[1];
-    char* out = NULL;
-    
-    // Пропускаем имя программы и команду
-    int new_argc = argc - 2;
-    char** new_argv = argv + 2;
-    
-    // Парсим опции (например, -o)
-    int skip = parse_options(new_argc, new_argv, &out);
-    if (skip < 0) return EXIT_FAILURE;
-    
-    // Обновляем аргументы после парсинга опций
-    new_argc -= skip;
-    
-    // Обработка команд
-    if (check_command(command, 3, "help", "--help", "-h")) {
-        command_help("huffman");
-    } 
-    else if (check_command(command, 2, "compress", "-c")) {
-        command_compress(new_argc, new_argv, out);
+    Instruction ins = parse_instruction(argc-1, argv+1);
+
+    if (ins.cmd == PARSER_ERROR) {
+        return 1;
     }
-    else if (check_command(command, 2, "decompress", "-d")) {
-        command_decompress(new_argc, new_argv, out);
+
+    if (ins.cmd == HELP) {
+        command_help(argv[0]);
+    } else if (ins.cmd == COMPRESS) {
+        int flag;
+        if (!ins.out) {
+            flag = compress(ins.files, ins.files_count, "archive.huff", ins.wordsize);
+        } else {
+            flag = compress(ins.files, ins.files_count, ins.out, ins.wordsize);
+        }
+
+        if (flag != 0) {
+            fprintf(stderr, "Compression canceled\n");
+            free(ins.files);
+            return 1;
+        }
+    } else if (ins.cmd == DECOMPRESS) {
+        int flag;
+        if (!ins.out) {
+            flag = decompress(ins.files, ins.files_count, ".", ins.wordsize);
+        } else {
+            flag = decompress(ins.files, ins.files_count, ins.out, ins.wordsize);
+        }
+
+        if (flag) {
+            fprintf(stderr, "Decompression canceled\n");
+            free(ins.files);
+            return 1;
+        }
+    } else {
+        fprintf(stderr, "Invalid command, check avaiable commands with:\n");
+        fprintf(stderr, "  %s -help\n", argv[0]);
+        free(ins.files);
+        return 1;
     }
-    else {
-        fprintf(stderr, "Error: Unknown command '%s'\n", command);
-        command_help("huffman");
-        return EXIT_FAILURE;
-    }
-    
-    return EXIT_SUCCESS;
+
+    free(ins.files);
+    return 0;
 }

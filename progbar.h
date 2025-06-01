@@ -1,3 +1,5 @@
+#pragma once
+
 void pg_update(long long delta);
 
 void pg_set(long long value);

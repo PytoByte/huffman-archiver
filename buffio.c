@@ -40,7 +40,9 @@ static size_t readbits(FileBufferIO* self, const void* ptr, unsigned long long s
     char* src = (char*)ptr;
     unsigned long long src_pointer = startbit;
 
-    src[src_pointer / 8] = 0;
+    for (int i = 0; i < count/8+(count%8 > 0); i++) {
+        src[i] = 0;
+    }
 
     while (count > readed_bits_count_total) {
         unsigned char src_bit = src_pointer % 8;
@@ -65,13 +67,13 @@ static size_t readbits(FileBufferIO* self, const void* ptr, unsigned long long s
         src_pointer += reading_bits_count;
         readed_bits_count_total += reading_bits_count; // Увеличиваю количество прочитанных бит
 
-        src[src_byte] += reading_bits >> src_bit; // Пишу биты в последний байт
+        src[src_byte] |= reading_bits >> src_bit; // Пишу биты в последний байт
         
         unsigned char avaiable_to_write = 8 - src_bit; // Сколько бит записалось
         if (avaiable_to_write < reading_bits_count) {
             unsigned char remain_bits_count = (reading_bits_count - avaiable_to_write); // Сколько бит не записалось
             src_byte++; // Запишу в следующий байт
-            src[src_byte] = reading_bits << (reading_bits_count - remain_bits_count); // Кстати байт очищается
+            src[src_byte] = reading_bits << (reading_bits_count - remain_bits_count);
         }
     }
 
@@ -105,7 +107,7 @@ static size_t writebits(FileBufferIO* self, const void* ptr, unsigned long long 
         src_pointer += writing_bits_count; // Сдвигаю указатель записи
         wrote_bits_count_total += writing_bits_count; // Увеличиваю количество записаных бит
 
-        self->buffer[self->byte_p] += writing_bits >> self->bit_p; // Запись битов в последний байт буфера
+        self->buffer[self->byte_p] |= writing_bits >> self->bit_p; // Запись битов в последний байт буфера
         
         unsigned char avaiable_to_write = 8 - self->bit_p; // Сколько бит записалось в послдений байт
         if (avaiable_to_write < writing_bits_count) {

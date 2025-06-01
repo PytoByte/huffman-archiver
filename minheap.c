@@ -2,16 +2,30 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 HuffmanNode* HuffmanNode_create(
-    unsigned char byte,
+    unsigned char wordsize,
+    unsigned char* word,
     unsigned long long freq,
     HuffmanNode* left,
     HuffmanNode* right
 ) {
     HuffmanNode* node = (HuffmanNode*)malloc(sizeof(HuffmanNode));
     if (node == NULL) return NULL;
-    node->byte = byte;
+    if (word == NULL) {
+        node->word = NULL;
+        node->wordsize = 0;
+        if (wordsize != 0) {
+            fprintf(stderr, "WARNING: In HuffmanNode_create() word NULL with size > 0\n");
+        }
+    } else {
+        node->wordsize = wordsize;
+        int wordsize_bytes = (wordsize/8 + (wordsize%8 > 0));
+        node->word = (unsigned char*)malloc(sizeof(unsigned char) * wordsize_bytes);
+        if (!node->word) return NULL;
+        strncpy(node->word, word, wordsize_bytes);
+    }
     node->freq = freq;
     node->left = left;
     node->right = right;
@@ -92,9 +106,9 @@ static HuffmanNode* extract_tree(MinHeap* self) {
         // Создание детерминированности. Среди двух минимальных по частоте узлов, правее = больше частота
         HuffmanNode* merge_node = NULL;
         if (node1->freq >= node2->freq) {
-            merge_node = HuffmanNode_create(0, node1->freq+node2->freq, node2, node1);
+            merge_node = HuffmanNode_create(0, NULL, node1->freq+node2->freq, node2, node1);
         } else {
-            merge_node = HuffmanNode_create(0, node1->freq+node2->freq, node1, node2);
+            merge_node = HuffmanNode_create(0, NULL, node1->freq+node2->freq, node1, node2);
         }
 
         insert(self, merge_node);
@@ -107,10 +121,12 @@ static HuffmanNode* extract_tree(MinHeap* self) {
     return tree;
 }
 
-MinHeap* MinHeap_create() {
+MinHeap* MinHeap_create(int capacity) {
     MinHeap* heap = (MinHeap*)malloc(sizeof(MinHeap));
     if (heap == NULL) return NULL;
     heap->size = 0;
+    heap->capacity = capacity;
+    heap->nodes = (HuffmanNode**)malloc(sizeof(HuffmanNode*) * capacity);
     heap->insert = insert;
     heap->extract = extract;
     heap->extract_tree = extract_tree;
@@ -118,11 +134,16 @@ MinHeap* MinHeap_create() {
 }
 
 void MinHeap_free(MinHeap* heap) {
+    for (int i = 0; i < heap->size; i++) {
+        free(heap->nodes[i]);
+    }
+    free(heap->nodes);
     free(heap);
 }
 
 void HuffmanNode_freetree(HuffmanNode* tree) {
     if (tree->left) HuffmanNode_freetree(tree->left);
     if (tree->right) HuffmanNode_freetree(tree->right);
+    if (tree->word) free(tree->word);
     free(tree);
 }

@@ -1,3 +1,5 @@
+#pragma once
+
 #define BUFFER_SIZE 4096
 
 #include "linkedlist.h"
@@ -18,20 +20,19 @@ typedef struct {
 
 typedef struct {
     unsigned char* code;
-    int size;
+    size_t size;
 } Code;
 
 typedef struct {
     Code* codes;
-    int size;
+    size_t size;
 } Codes;
 
 typedef struct {
     hlist* files;
     int files_c;
-    unsigned long long size;
 } CompressingFiles;
 
-int compress(int files_count, char** filenames, char* archivename);
+int compress(char** paths, int paths_count, char* archivepath, int wordsize_arg);
 
-int decompress(char* dir, char* archivename);
+int decompress(char** paths, int paths_count, char* outdir, int wordsize_arg);

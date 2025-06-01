@@ -1,3 +1,5 @@
+#pragma once
+
 typedef struct llist {
     struct llist* next;
     char* path;

@@ -26,6 +26,7 @@ static void pg_print() {
         printf("-");
     }
     printf("] %3d%%", percent);
+    printf(" %lld/%lld", value, limit);
     fflush(stdout);
 }
 
