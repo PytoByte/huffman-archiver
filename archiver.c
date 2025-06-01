@@ -823,9 +823,7 @@ static int create_directories(const char *path) {
     return 0;
 }
 
-int decompress(char** paths, int paths_count, char* outdir, int wordsize_arg) {
-    wordsize = wordsize_arg;
-
+int decompress(char** paths, int paths_count, char* outdir) {
     if (paths_count == 0) {
         fprintf(stderr, "Nothing to decompress\n");
         return 1;

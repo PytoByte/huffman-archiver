@@ -35,4 +35,4 @@ typedef struct {
 
 int compress(char** paths, int paths_count, char* archivepath, int wordsize_arg);
 
-int decompress(char** paths, int paths_count, char* outdir, int wordsize_arg);
+int decompress(char** paths, int paths_count, char* outdir);

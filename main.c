@@ -36,8 +36,8 @@ typedef struct Manual {
 
 Manual commands_manual[] = {
     {2, (const char*[]){"-help", "-h"}, "Show help information", "-help"},
-    {2, (const char*[]){"-compress", "-c"}, "Compress files", "-compress [files|dirs] -output <file>"},
-    {2, (const char*[]){"-decompress", "-d"}, "Decompress files", "-decompress [archives] -output <dir>"},
+    {2, (const char*[]){"-compress", "-c"}, "Compress files", "-compress [files|dirs] -output <file> -word <number>"},
+    {2, (const char*[]){"-decompress", "-d"}, "Decompress files", "-decompress [archives] -output <dir> -word <number>"},
     {0, NULL, NULL, NULL}
 };
 
@@ -226,9 +226,9 @@ int main(int argc, char* argv[]) {
     } else if (ins.cmd == DECOMPRESS) {
         int flag;
         if (!ins.out) {
-            flag = decompress(ins.files, ins.files_count, ".", ins.wordsize);
+            flag = decompress(ins.files, ins.files_count, ".");
         } else {
-            flag = decompress(ins.files, ins.files_count, ins.out, ins.wordsize);
+            flag = decompress(ins.files, ins.files_count, ins.out);
         }
 
         if (flag) {
