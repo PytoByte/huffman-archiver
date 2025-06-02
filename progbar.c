@@ -3,20 +3,26 @@
 
 #include "progbar.h"
 
-static unsigned long long limit;
-static unsigned long long value;
+static int current_percent = -1;
+static unsigned long long limit = 1;
+static unsigned long long value = 1;
 
 static void pg_print() {
-    int fill_count = 20;
+    int fill_count = 40;
+    int max = 100;
+    int percent = (max*value) / limit;
+    if (current_percent == percent) {
+        return;
+    }
+    current_percent = percent;
 
     printf("\r");
-    int percent = (100*value) / limit;
     if (percent < 0) {
         percent = 0;
-    } else if (percent > 100) {
-        percent = 100;
+    } else if (percent > max) {
+        percent = max;
     }
-    int fill = (fill_count * percent) / 100;
+    int fill = (fill_count * percent) / max;
 
     printf("[");
     for (int j = 0; j < fill; j++) {
@@ -26,7 +32,7 @@ static void pg_print() {
         printf("-");
     }
     printf("] %3d%%", percent);
-    printf(" %lld/%lld", value, limit);
+    //printf(" %lld/%lld", value, limit);
     fflush(stdout);
 }
 
@@ -49,5 +55,6 @@ void pg_init(long long lim, long long start_value) {
 void pg_end() {
     value = limit;
     pg_print();
+    current_percent = -1;
     printf("\n");
 }

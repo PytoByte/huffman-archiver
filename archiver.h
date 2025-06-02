@@ -2,24 +2,28 @@
 
 #define BUFFER_SIZE 4096
 
+#include <stdint.h>
+
+#include "buffio.h"
 #include "linkedlist.h"
 
 typedef struct {
     int count;
     int current;
     char* name;
-    unsigned long long size;
-    unsigned int treesize;
-    unsigned long long filestart;
+    uint64_t size;
+    uint32_t treesize;
+    uint64_t filestart;
+    FileBufferIO* fb;
 } FileFrame;
 
 typedef struct {
-    unsigned long long original;
-    unsigned long long compressed;
+    uint64_t original;
+    uint64_t compressed;
 } FileSize;
 
 typedef struct {
-    unsigned char* code;
+    uint8_t* code;
     size_t size;
 } Code;
 
@@ -30,9 +34,10 @@ typedef struct {
 
 typedef struct {
     hlist* files;
-    int files_c;
+    unsigned long long total_size;
+    int count;
 } CompressingFiles;
 
-int compress(char** paths, int paths_count, char* archivepath, int wordsize_arg);
+int compress(char** paths, int paths_count, char* archivepath, uint8_t wordsize_arg);
 
 int decompress(char** paths, int paths_count, char* outdir);

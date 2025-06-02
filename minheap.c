@@ -5,8 +5,8 @@
 #include <string.h>
 
 HuffmanNode* HuffmanNode_create(
-    unsigned char wordsize,
-    unsigned char* word,
+    uint8_t wordsize,
+    uint8_t* word,
     unsigned long long freq,
     HuffmanNode* left,
     HuffmanNode* right
@@ -89,6 +89,9 @@ static void insert(MinHeap* self, HuffmanNode* node) {
 }
 
 static HuffmanNode* extract(MinHeap* self) {
+    if (self->size==0) {
+        return NULL;
+    }
     HuffmanNode* res = self->nodes[0];
     swap(&self->nodes[0], &self->nodes[--self->size]);
     heapify_down(self, 0);
@@ -99,7 +102,7 @@ static HuffmanNode* extract(MinHeap* self) {
 static HuffmanNode* extract_tree(MinHeap* self) {
     HuffmanNode* tree;
 
-    while (self->size != 1) {
+    while (self->size > 1) {
         HuffmanNode* node1 = extract(self);
         HuffmanNode* node2 = extract(self);
 
@@ -115,8 +118,6 @@ static HuffmanNode* extract_tree(MinHeap* self) {
     }
 
     tree = extract(self);
-
-    self->size = 0;
 
     return tree;
 }

@@ -1,16 +1,18 @@
 #pragma once
 
+#include <stdint.h>
+
 typedef struct HuffmanNode {
-    unsigned char wordsize;
-    unsigned char* word;
+    uint8_t wordsize;
+    uint8_t* word;
     unsigned long long freq;
     struct HuffmanNode* left;
     struct HuffmanNode* right;
 } HuffmanNode;
 
 HuffmanNode* HuffmanNode_create(
-    unsigned char wordsize,
-    unsigned char* word,
+    uint8_t wordsize,
+    uint8_t* word,
     unsigned long long freq,
     HuffmanNode* left,
     HuffmanNode* right
