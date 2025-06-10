@@ -14,6 +14,12 @@
 
 static uint8_t wordsize = 1;
 
+void printbinary(unsigned char* num, int bits) {
+    for (int i = 0; i < bits; i++) {
+        printf("%d", (num[0] >> (bits - i - 1)) & 1);
+    }
+}
+
 // Возвращает количество цифр в числе
 static int digits_count(int num) {
     int c = 0;
@@ -115,16 +121,16 @@ static char* generate_unique_filepath(const char* path_old) {
 // == Построение кодов по дереву Хаффмана ========
 static int wordtoi(const uint8_t* word) {
     int word_ind = 0;
-    for (int i = 0; i < wordsize; i++) {
-        word_ind += ((int)word[i]) << (8 * (wordsize - i - 1));
-    }
+    memcpy(&word_ind, word, wordsize);
     return word_ind;
 }
 
 static void Codes_free(Codes codes) {
     for (int i = 0; i < codes.size; i++) {
         if (codes.codes[i].size != 0) {
+            //printf("Freeing code %d\n", i); // DEBUG
             free(codes.codes[i].code);
+            codes.codes[i].size = 0;
         }
     }
     free(codes.codes);
@@ -140,32 +146,54 @@ static char Codes_build_reqursion(HuffmanNode* tree, Code* codes, uint8_t* curco
         fprintf(stderr, "Corrupted huffman tree\n");
         return -1;
     }
-    if (tree->left == NULL && tree->right == NULL && codesize == 0 && tree->wordsize< wordsize*8) {
+
+    unsigned int codesize_bytes = codesize / 8 + (codesize % 8 > 0);
+
+    if (tree->left == NULL && tree->right == NULL && codesize == 0 && tree->wordsize < wordsize*8) {
+        codesize_bytes = tree->wordsize / 8 + (tree->wordsize % 8 > 0);
+
         codes[(1 << (wordsize*8))].size = 1;
-        codes[(1 << (wordsize*8))].code = (uint8_t*)malloc(1);
+        codes[(1 << (wordsize*8))].code = (uint8_t*)malloc(codesize_bytes);
         if (!codes[(1 << (wordsize*8))].code) {
             fprintf(stderr, "Out of memory\n");
             return -1;
         }
+        //printf("Setting code last %d\n", 1 << (wordsize*8)); // DEBUG
         codes[(1 << (wordsize*8))].code[0] = 0;
         return 0;
     } else if (tree->left == NULL && tree->right == NULL && codesize == 0) {
+        codesize_bytes = tree->wordsize / 8 + (tree->wordsize % 8 > 0);
+
         codes[wordtoi(tree->word)].size = 1;
-        codes[wordtoi(tree->word)].code = (uint8_t*)malloc(1);
+        codes[wordtoi(tree->word)].code = (uint8_t*)malloc(codesize_bytes);
         if (!codes[wordtoi(tree->word)].code) {
             fprintf(stderr, "Out of memory\n");
             return -1;
         }
+        //printf("Setting code single %d\n", wordtoi(tree->word, tree->wordsize)); // DEBUG
         codes[wordtoi(tree->word)].code[0] = 0;
         return 0;
     } else if (tree->left == NULL && tree->right == NULL) {
-        unsigned int codesize_bytes = codesize / 8 + (codesize % 8 > 0);
-        int word_index = wordtoi(tree->word); 
+        int word_index;
         if (tree->wordsize < wordsize*8) {
             word_index = (1 << (wordsize*8));
+        } else {
+            word_index = wordtoi(tree->word);
         }
+
+        if (codes[word_index].size) {
+            printf("word "); // DEBUG
+            printbinary(tree->word, tree->wordsize); // DEBUG
+            printf("\n"); // DEBUG
+            printf("WARNING: Code for word (ind %d): (code ", word_index); // DEBUG
+            printbinary(codes[word_index].code, codes[word_index].size);
+            printf(") is already set\n"); // DEBUG
+        }
+
         codes[word_index].size = codesize;
         codes[word_index].code = (uint8_t*)malloc(codesize_bytes);
+
+        //printf("Setting code leaf %ld %d\n", codes[word_index].size, word_index); // DEBUG
         if (!codes[word_index].code) {
             fprintf(stderr, "Out of memory\n");
             return -1;
@@ -245,13 +273,6 @@ static size_t fwrite_tree(HuffmanNode* tree, FileBufferIO* stream_write) {
     }
 
     return tree_size;
-}
-
-void printbin(unsigned long long n) {
-    while (n != 0) {
-        printf("%lld", n % 2);
-        n /= 2;
-    }
 }
 
 // Чтение дерева из файла
@@ -683,13 +704,15 @@ static FileSize compress_file(FileBufferIO* archive, const char* path, long size
 
     // Построение дерева
     MinHeap* heap = MinHeap_create(freqs_size+1);
-    for (int i = 0; i < freqs_size; i++) {
+    for (unsigned int i = 0; i < freqs_size; i++) {
         if (freqs[i]==0) {
             continue;
         }
-        for (int j = 0; j < wordsize; j++) {
-            word[wordsize - 1 - j] = (uint8_t)((i >> (8 * j)) & 0xFF);
-        }
+        memcpy(word, &i, wordsize);
+        //printf("%d\n", word[0]); // DEBUG
+        //printf("extracted word from %d: ", i); // DEBUG
+        //printbinary(word, wordsize*8); // DEBUG
+        //printf("\n"); // DEBUG
         HuffmanNode* node = HuffmanNode_create(wordsize*8, word, freqs[i], NULL, NULL);
         if (!node) {
             fprintf(stderr, "Out of memory\n");
@@ -807,6 +830,7 @@ int compress(char** paths, int paths_count, char* archivepath, uint8_t wordsize_
             continue;
         }
         FileSize filesize = compress_file(archive, cur->path, cur->size_pos);
+        //getchar(); // DEBUG
         if (filesize.compressed == 0 && filesize.original != 0) {
             pg_end();
             free(unique_archivepath);
