@@ -141,7 +141,7 @@ static void Codes_free(Codes codes) {
 // codes - список кодов (заполняется)
 // curcode - текущий код
 // codesize - размер текущего кода в битах
-static char Codes_build_reqursion(HuffmanNode* tree, Code* codes, uint8_t* curcode, int codesize) {
+static char Codes_build_reqursion(HuffmanNode* tree, Code* codes, uint8_t* curcode, unsigned char codesize) {
     if ((tree->left == NULL && tree->right != NULL) || (tree->left != NULL && tree->right == NULL)) {
         fprintf(stderr, "Corrupted huffman tree\n");
         return -1;

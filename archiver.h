@@ -24,7 +24,7 @@ typedef struct {
 
 typedef struct {
     uint8_t* code;
-    size_t size;
+    uint8_t size;
 } Code;
 
 typedef struct {
