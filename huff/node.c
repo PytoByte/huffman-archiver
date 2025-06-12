@@ -23,8 +23,14 @@ HuffmanNode* HuffmanNode_create(
         node->wordsize = wordsize;
         int wordsize_bytes = (wordsize/8 + (wordsize%8 > 0));
         node->word = (unsigned char*)malloc(sizeof(unsigned char) * wordsize_bytes);
-        if (!node->word) return NULL;
-        strncpy(node->word, word, wordsize_bytes);
+        if (!node->word) {
+            free(node);
+            return NULL;
+        }
+
+        for (int i = 0; i < wordsize_bytes; i++) {
+            node->word[i] = word[i];
+        }
     }
     node->freq = freq;
     node->left = left;

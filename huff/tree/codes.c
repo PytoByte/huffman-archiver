@@ -66,7 +66,7 @@ char Codes_build_reqursion(HuffmanNode* tree, Code* codes, uint8_t* curcode, uns
         }
 
         if (codes[word_index].size) {
-            printf("WARNING: Code for word (ind %d) is already set\n", word_index);
+            printf("\nWARNING: Code for word (ind %d) is already set\n", word_index);
         }
 
         codes[word_index].size = codesize;

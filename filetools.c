@@ -99,3 +99,11 @@ char* generate_unique_filepath(const char* path) {
    return unique_path;
 }
 
+int check_files_similar(char* path1, char* path2) {
+    struct stat stat1;
+    stat(path1, &stat1);
+    struct stat stat2;
+    stat(path2, &stat2);
+
+    return stat1.st_ino == stat2.st_ino;
+}

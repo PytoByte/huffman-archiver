@@ -165,6 +165,8 @@ static long prepare_fileheader(FileBufferIO* archive, char* path) {
    return size_pos;
 }
 
+// startpath - file or dir, which need to compress
+// addpath - if startpath if folder, when addpath stores subdirs of start folder
 static PreparedFiles prepare_fileheaders(FileBufferIO* archive, hlist* list, char* startpath, char* addpath) {
     char* path = (char*)malloc(strlen(startpath) + strlen(addpath) + 1);
     if (!path) {
@@ -174,6 +176,12 @@ static PreparedFiles prepare_fileheaders(FileBufferIO* archive, hlist* list, cha
 
     strcpy(path, startpath);
     strcat(path, addpath);
+
+    if (check_files_similar(archive->path, path)) {
+        fprintf(stderr, "WARNING: Skipping archive itself\n");
+        free(path);
+        return (PreparedFiles){0, 0};
+    }
 
     struct stat file_stat;
     if (stat(path, &file_stat) == -1) {
@@ -433,6 +441,7 @@ static int next_fileframe(FileFrame* fileframe) {
 }
 // == Получение файлов из архива =================
 
+
 // == Сжатие файлов ==============================
 static FileSize compress_file(FileBufferIO* archive, const char* path, long size_pos) {
     FileSize filesize;
@@ -508,6 +517,7 @@ static FileSize compress_file(FileBufferIO* archive, const char* path, long size
         //printf("extracted word from %d: ", i); // DEBUG
         //printbinary(word, wordsize*8); // DEBUG
         //printf("\n"); // DEBUG
+        
         HuffmanNode* node = HuffmanNode_create(wordsize*8, word, freqs[i], NULL, NULL);
         if (!node) {
             fprintf(stderr, "Out of memory\n");
@@ -518,6 +528,7 @@ static FileSize compress_file(FileBufferIO* archive, const char* path, long size
             TreeBuilder_free(tree_builder);
             return filesize;
         }
+
         tree_builder->insert(tree_builder, node);
     }
 
@@ -539,10 +550,10 @@ static FileSize compress_file(FileBufferIO* archive, const char* path, long size
     free(freqs);
 
     HuffmanNode* tree = tree_builder->extract_tree(tree_builder);
+
     TreeBuilder_free(tree_builder);
 
     // Кодировка по дереву
-    printf("in file %s\n", path);
     Codes codes = Codes_build(tree);
     if (codes.size == 0) {
         free(word);

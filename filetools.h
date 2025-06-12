@@ -15,3 +15,6 @@ char* get_filename(char* filepath);
 // !!! After use, free returned value if non-null !!!
 char* generate_unique_filepath(const char* path);
 
+// Returns 1 if the files similar, else 0
+int check_files_similar(char* path1, char* path2);
+
