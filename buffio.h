@@ -2,6 +2,7 @@
 
 typedef struct FileBufferIO {
     FILE* fp;
+    char* path;
     char* modes;
     char* buffer;
     size_t buffer_size;
@@ -19,6 +20,6 @@ void nextbuffer(FileBufferIO* self);
 
 size_t writebuffer(FileBufferIO* self);
 
-FileBufferIO* FileBufferIO_open(const char* filename, const char* modes, size_t buffer_size);
+FileBufferIO* FileBufferIO_open(const char* filepath, const char* modes, size_t buffer_size);
 
 void FileBufferIO_close(FileBufferIO* fb);

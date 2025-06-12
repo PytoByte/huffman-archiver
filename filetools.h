@@ -1,0 +1,17 @@
+#pragma once
+#include <stdio.h>
+
+// Returns 1 if the file exists, else 0
+int check_file_exist(const char* filepath);
+
+// Returns the size of the file in bytes
+size_t get_filesize(const char* filepath);
+
+// Returns a pointer to the file name
+char* get_filename(char* filepath);
+
+
+// Generates a unique filepath by appending "(n)" to the filename
+// !!! After use, free returned value if non-null !!!
+char* generate_unique_filepath(const char* path);
+

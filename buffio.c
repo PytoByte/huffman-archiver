@@ -133,18 +133,27 @@ static size_t readbytes(FileBufferIO* self, const void* ptr, unsigned long long 
     readbits(self, ptr, startbit, count*8);
 }
 
-FileBufferIO* FileBufferIO_open(const char* filename, const char* modes, size_t buffer_size) {
+FileBufferIO* FileBufferIO_open(const char* filepath, const char* modes, size_t buffer_size) {
     FileBufferIO* fb = (FileBufferIO*)malloc(sizeof(FileBufferIO));
-    fb->fp = fopen(filename, modes);
+    fb->fp = fopen(filepath, modes);
     if (fb->fp == NULL) {
-        fprintf(stderr, "Can't open file %s\n", filename);
+        fprintf(stderr, "Can't open file %s\n", filepath);
         free(fb);
         return NULL;
     }
+    fb->path = (char*)malloc(strlen(filepath)+1);
+    if (fb->path == NULL) {
+        fprintf(stderr, "Out of memory\n");
+        free(fb);
+        return NULL;
+    }
+    strcpy(fb->path, filepath);
+
     fb->modes = (char*)malloc(strlen(modes)+1);
     if (fb->modes == NULL) {
         fprintf(stderr, "Out of memory\n");
         free(fb);
+        free(fb->path);
         return NULL;
     }
     strcpy(fb->modes, modes);
@@ -153,6 +162,7 @@ FileBufferIO* FileBufferIO_open(const char* filename, const char* modes, size_t 
         fprintf(stderr, "Out of memory\n");
         free(fb);
         free(fb->modes);
+        free(fb->path);
         return NULL;
     }
     fb->buffer_size = buffer_size;
@@ -178,6 +188,7 @@ void FileBufferIO_close(FileBufferIO* fb) {
     }
 
     fclose(fb->fp);
+    free(fb->path);
     free(fb->modes);
     free(fb->buffer);
     free(fb);
