@@ -599,10 +599,7 @@ static FileSize compress_file(FileBufferIO* archive, const char* path, long size
     return filesize;
 }
 
-int compress(char** paths, int paths_count, char* archivepath, uint8_t wordsize_arg) {
-    // Set word size
-    wordsize = wordsize_arg;
-
+int compress(char** paths, int paths_count, char* archivepath) {
     // Сhecking that the paths have been passed
     if (paths_count <= 0) {
         fprintf(stderr, "Nothing to compress\n");
@@ -664,213 +661,322 @@ int compress(char** paths, int paths_count, char* archivepath, uint8_t wordsize_
 // == Сжатие файлов ==============================
 
 // == Распаковка файлов ==========================
-static int create_directories(const char *path) {
-    char* pp = NULL;
-    char* sp = NULL;
-
-    char* temp = (char*)malloc(strlen(path)+1);
-    if (!temp) {
-        fprintf(stderr, "Out of memory");
-        return 1;
-    }
-    strcpy(temp, path);
-
-    pp = temp;
-    while ((sp = strchr(pp, '/')) != NULL) {
-        if (sp != temp) { // не корневая директория "/"
-            *sp = '\0';
-            if (check_file_exist(temp) == 0) {
-                if (mkdir(temp, 0700) == -1) {
-                    perror("mkdir");
-                    free(temp);
-                    return 1;
-                }
-            }
-            *sp = '/';
-        }
-        pp = sp + 1;
-    }
-
-    free(temp);
-    return 0;
-}
-
-int decompress(char** paths, int paths_count, char* outdir) {
-    if (paths_count == 0) {
+int decompress(char* archivepath, char* outdir, char** filepaths, int filepaths_count, char** dirpaths, int dirpaths_count) {
+    if (!archivepath) {
         fprintf(stderr, "Nothing to decompress\n");
         return 1;
     }
 
-    for (int i = 0; i < paths_count; i++) {
-        char* archivepath = paths[i];
-        FileBufferIO* archive = FileBufferIO_open(archivepath, "rb", BUFFER_SIZE);
-        if (!archive) {
-            return 1;
-        }
+    FileBufferIO* archive = FileBufferIO_open(archivepath, "rb", BUFFER_SIZE);
+    if (!archive) {
+        return 1;
+    }
 
-        FileBufferIO* archive_frame = FileBufferIO_open(archivepath, "rb", BUFFER_SIZE);
-        if (!archive_frame) {
-            FileBufferIO_close(archive);
-            return 1;
-        }
+    FileBufferIO* archive_frame = FileBufferIO_open(archivepath, "rb", BUFFER_SIZE);
+    if (!archive_frame) {
+        FileBufferIO_close(archive);
+        return 1;
+    }
 
-        uint32_t files_count = 0;
-        if (!archive_frame->readbytes(archive_frame, &files_count, 0, sizeof(files_count))) {
-            fprintf(stderr, "EOF while reading headers\n");
-            FileBufferIO_close(archive);
-            FileBufferIO_close(archive_frame);
-            return 1;
-        }
-
-        if (!archive_frame->readbytes(archive_frame, &wordsize, 0, sizeof(wordsize))) {
-            fprintf(stderr, "EOF while reading headers\n");
-            FileBufferIO_close(archive);
-            FileBufferIO_close(archive_frame);
-            return 1;
-        }
-
-        FileFrame fileframe = get_fileframe(archive_frame, files_count);
-        if (fileframe.count == -1) {
-            FileBufferIO_close(archive);
-            FileBufferIO_close(archive_frame);
-            return 1;
-        }
-
-        printf("Decompressing files from %s\n", archivepath);
-        pg_init(get_filesize(archivepath)*8, 0);
-        do {
-            int fs = fseek(archive->fp, fileframe.filestart / 8, SEEK_SET);
-            if (fs != 0) {
-                pg_end();
-                fprintf(stderr, "Fseek error\n");
-                end_fileframe(&fileframe);
-                FileBufferIO_close(archive);
-                FileBufferIO_close(archive_frame);
-                return 1;
-            }
-
-            nextbuffer(archive);
-            archive->bit_p = fileframe.filestart % 8;
-
-            char* path = (char*)malloc(strlen(outdir) + strlen(fileframe.name) + 2);
-            if (!path) {
-                pg_end();
-                fprintf(stderr, "Out of memory\n");
-                end_fileframe(&fileframe);
-                FileBufferIO_close(archive);
-                FileBufferIO_close(archive_frame);
-                return 1;
-            }
-            sprintf(path, "%s/%s", outdir, fileframe.name);
-            if (create_directories(path) != 0) {
-                pg_end();
-                free(path);
-                end_fileframe(&fileframe);
-                FileBufferIO_close(archive);
-                FileBufferIO_close(archive_frame);
-                return 1;
-            }
-
-            char* unique_path = generate_unique_filepath(path);
-            free(path);
-            if (!unique_path) {
-                pg_end();
-                end_fileframe(&fileframe);
-                FileBufferIO_close(archive);
-                FileBufferIO_close(archive_frame);
-                return 1;
-            }
-            FileBufferIO* file_decompress = FileBufferIO_open(unique_path, "wb", BUFFER_SIZE);
-            if (!file_decompress) {
-                pg_end();
-                free(unique_path);
-                end_fileframe(&fileframe);
-                FileBufferIO_close(archive);
-                FileBufferIO_close(archive_frame);
-                return 1;
-            }
-            free(unique_path);
-
-            if (fileframe.treesize == 0) {
-                FileBufferIO_close(file_decompress);
-                continue;
-            }
-
-            HuffmanNode* tree = fread_tree(archive, fileframe.treesize, 0);
-            if (!tree) {
-                pg_end();
-                end_fileframe(&fileframe);
-                FileBufferIO_close(archive);
-                FileBufferIO_close(archive_frame);
-                FileBufferIO_close(file_decompress);
-                return 1;
-            }
-
-            HuffmanNode* node_cur = tree;
-            for (unsigned long long i = 0; i < fileframe.size - fileframe.treesize; i++) {
-                unsigned char bit = 0;
-                size_t readed = 0;
-                if (!(readed = archive->readbits(archive, &bit, 7, 1))) {
-                    pg_end();
-                    fprintf(stderr, "EOF while decompressing\n");
-                    end_fileframe(&fileframe);
-                    FileBufferIO_close(archive);
-                    FileBufferIO_close(archive_frame);
-                    FileBufferIO_close(file_decompress);
-                    HuffmanNode_freetree(tree);
-                    return 1;
-                }
-
-                if (node_cur==tree && node_cur->wordsize!=0) {
-                    if (bit==0) {
-                        file_decompress->writebits(file_decompress, node_cur->word, 0, node_cur->wordsize);
-                        continue;
-                    } else {
-                        pg_end();
-                        fprintf(stderr, "Corrupted huffman tree - unexpected bit\n");
-                        end_fileframe(&fileframe);
-                        FileBufferIO_close(archive);
-                        FileBufferIO_close(archive_frame);
-                        FileBufferIO_close(file_decompress);
-                        HuffmanNode_freetree(tree);
-                        return 1;
-                    }
-                }
-
-                if (bit==0) {
-                    node_cur = node_cur->left;
-                } else if (bit==1) {
-                    node_cur = node_cur->right;
-                }
-
-                if (!node_cur) {
-                    pg_end();
-                    fprintf(stderr, "Corrupted huffman tree or file\n");
-                    end_fileframe(&fileframe);
-                    FileBufferIO_close(archive);
-                    FileBufferIO_close(archive_frame);
-                    FileBufferIO_close(file_decompress);
-                    HuffmanNode_freetree(tree);
-                    return 1;
-                }
-                
-                if (node_cur->left==NULL && node_cur->right==NULL) {
-                    file_decompress->writebits(file_decompress, node_cur->word, 0, node_cur->wordsize);
-                    node_cur = tree;
-                }
-                pg_update(readed);
-            }
-
-            HuffmanNode_freetree(tree);
-            FileBufferIO_close(file_decompress);
-        } while (next_fileframe(&fileframe));
-
+    uint32_t files_count = 0;
+    if (!archive_frame->readbytes(archive_frame, &files_count, 0, sizeof(files_count))) {
+        fprintf(stderr, "EOF while reading headers\n");
         FileBufferIO_close(archive);
         FileBufferIO_close(archive_frame);
-
-        pg_end();
+        return 1;
     }
+
+    if (!archive_frame->readbytes(archive_frame, &wordsize, 0, sizeof(wordsize))) {
+        fprintf(stderr, "EOF while reading headers\n");
+        FileBufferIO_close(archive);
+        FileBufferIO_close(archive_frame);
+        return 1;
+    }
+
+    FileFrame fileframe = get_fileframe(archive_frame, files_count);
+    if (fileframe.count == -1) {
+        FileBufferIO_close(archive);
+        FileBufferIO_close(archive_frame);
+        return 1;
+    }
+
+    printf("Decompressing files from %s\n", archivepath);
+    pg_init(get_filesize(archivepath)*8, 0);
+
+    int filepaths_remain = filepaths_count;
+    int dirpaths_remain = dirpaths_count;
+    int lastdir_ind = -1;
+    do {
+        // cutted_filepath pointer may be moved forward, to cut non-required directories
+        char* cutted_filepath = fileframe.name;
+
+        // If filter is set
+        if (filepaths_count+dirpaths_count > 0) {
+            int flag_match = 0;
+
+            if (lastdir_ind > 0 && strstr(fileframe.name, dirpaths[lastdir_ind]) == fileframe.name) {
+                flag_match = 1;
+                
+                cutted_filepath += get_filename(dirpaths[lastdir_ind])-dirpaths[lastdir_ind];
+            } else {
+                lastdir_ind = -1;
+            }
+
+            // check dir match
+            for (int i = 0; i < dirpaths_count && dirpaths_remain > 0 && !flag_match; i++) {
+                if (strstr(fileframe.name, dirpaths[i]) == fileframe.name) {
+                    flag_match = 1;
+                    lastdir_ind = i;
+                    dirpaths_remain--;
+
+                    cutted_filepath += get_filename(dirpaths[i])-dirpaths[i];
+
+                    break;
+                }
+            }
+
+            // check file match
+            // if file found in required directory earlier, it skips
+            for (int i = 0; i < filepaths_count && filepaths_remain && !flag_match > 0; i++) {
+                if (strstr(fileframe.name, filepaths[i]) != fileframe.name) {
+                    continue;
+                }
+
+                if (strcmp(get_filename(fileframe.name), get_filename(filepaths[i])) == 0) {
+                    flag_match = 1;
+                    filepaths_remain--;
+                    cutted_filepath = get_filename(cutted_filepath);
+                    break;
+                }
+            }
+
+            if (!flag_match) continue;
+        }
+
+        int fs = fseek(archive->fp, fileframe.filestart / 8, SEEK_SET);
+        if (fs != 0) {
+            pg_end();
+            fprintf(stderr, "Fseek error\n");
+            end_fileframe(&fileframe);
+            FileBufferIO_close(archive);
+            FileBufferIO_close(archive_frame);
+            return 1;
+        }
+
+        nextbuffer(archive);
+        archive->bit_p = fileframe.filestart % 8;
+
+        char* path = (char*)malloc(strlen(outdir) + strlen(cutted_filepath) + 2);
+        if (!path) {
+            pg_end();
+            fprintf(stderr, "Out of memory\n");
+            end_fileframe(&fileframe);
+            FileBufferIO_close(archive);
+            FileBufferIO_close(archive_frame);
+            return 1;
+        }
+        sprintf(path, "%s/%s", outdir, cutted_filepath);
+        if (create_directories(path) != 0) {
+            pg_end();
+            free(path);
+            end_fileframe(&fileframe);
+            FileBufferIO_close(archive);
+            FileBufferIO_close(archive_frame);
+            return 1;
+        }
+
+        char* unique_path = generate_unique_filepath(path);
+        free(path);
+        if (!unique_path) {
+            pg_end();
+            end_fileframe(&fileframe);
+            FileBufferIO_close(archive);
+            FileBufferIO_close(archive_frame);
+            return 1;
+        }
+        FileBufferIO* file_decompress = FileBufferIO_open(unique_path, "wb", BUFFER_SIZE);
+        if (!file_decompress) {
+            pg_end();
+            free(unique_path);
+            end_fileframe(&fileframe);
+            FileBufferIO_close(archive);
+            FileBufferIO_close(archive_frame);
+            return 1;
+        }
+        free(unique_path);
+
+        if (fileframe.treesize == 0) {
+            FileBufferIO_close(file_decompress);
+            continue;
+        }
+
+        HuffmanNode* tree = fread_tree(archive, fileframe.treesize, 0);
+        if (!tree) {
+            pg_end();
+            end_fileframe(&fileframe);
+            FileBufferIO_close(archive);
+            FileBufferIO_close(archive_frame);
+            FileBufferIO_close(file_decompress);
+            return 1;
+        }
+
+        HuffmanNode* node_cur = tree;
+        for (unsigned long long i = 0; i < fileframe.size - fileframe.treesize; i++) {
+            unsigned char bit = 0;
+            size_t readed = 0;
+            if (!(readed = archive->readbits(archive, &bit, 7, 1))) {
+                pg_end();
+                fprintf(stderr, "EOF while decompressing\n");
+                end_fileframe(&fileframe);
+                FileBufferIO_close(archive);
+                FileBufferIO_close(archive_frame);
+                FileBufferIO_close(file_decompress);
+                HuffmanNode_freetree(tree);
+                return 1;
+            }
+
+            if (node_cur==tree && node_cur->wordsize!=0) {
+                if (bit==0) {
+                    file_decompress->writebits(file_decompress, node_cur->word, 0, node_cur->wordsize);
+                    continue;
+                } else {
+                    pg_end();
+                    fprintf(stderr, "Corrupted huffman tree - unexpected bit\n");
+                    end_fileframe(&fileframe);
+                    FileBufferIO_close(archive);
+                    FileBufferIO_close(archive_frame);
+                    FileBufferIO_close(file_decompress);
+                    HuffmanNode_freetree(tree);
+                    return 1;
+                }
+            }
+
+            if (bit==0) {
+                node_cur = node_cur->left;
+            } else if (bit==1) {
+                node_cur = node_cur->right;
+            }
+
+            if (!node_cur) {
+                pg_end();
+                fprintf(stderr, "Corrupted huffman tree or file\n");
+                end_fileframe(&fileframe);
+                FileBufferIO_close(archive);
+                FileBufferIO_close(archive_frame);
+                FileBufferIO_close(file_decompress);
+                HuffmanNode_freetree(tree);
+                return 1;
+            }
+            
+            if (node_cur->left==NULL && node_cur->right==NULL) {
+                file_decompress->writebits(file_decompress, node_cur->word, 0, node_cur->wordsize);
+                node_cur = tree;
+            }
+            pg_update(readed);
+        }
+
+        HuffmanNode_freetree(tree);
+        FileBufferIO_close(file_decompress);
+    } while (next_fileframe(&fileframe));
+
+    FileBufferIO_close(archive);
+    FileBufferIO_close(archive_frame);
+
+    pg_end();
 
     return 0;
 }
 // == Распаковка файлов ==========================
+
+int show_files(char* archivepath, char* dirpath) {
+    char* dirpath_files = NULL;
+    if (dirpath) {
+        dirpath_files = (char*)malloc(strlen(dirpath)+2);
+        strncpy(dirpath_files, dirpath, strlen(dirpath)+2);
+        dirpath_files[strlen(dirpath)] = '/';
+    } else {
+        dirpath_files = (char*)malloc(1);
+        dirpath_files[0] = '\0';
+    }
+
+    FileBufferIO* archive = FileBufferIO_open(archivepath, "rb", BUFFER_SIZE);
+    if (!archive) {
+        free(dirpath_files);
+        return 1;
+    }
+
+    uint32_t files_count = 0;
+    if (!archive->readbytes(archive, &files_count, 0, sizeof(files_count))) {
+        fprintf(stderr, "EOF while reading headers\n");
+        free(dirpath_files);
+        FileBufferIO_close(archive);
+        return 1;
+    }
+
+    if (!archive->readbytes(archive, &wordsize, 0, sizeof(wordsize))) {
+        fprintf(stderr, "EOF while reading headers\n");
+        free(dirpath_files);
+        FileBufferIO_close(archive);
+        return 1;
+    }
+
+    FileFrame fileframe = get_fileframe(archive, files_count);
+    if (fileframe.count == -1) {
+        free(dirpath_files);
+        FileBufferIO_close(archive);
+        return 1;
+    }
+
+    char empty_dir = 1;
+    char* prevdir = NULL;
+    do {
+        if (strstr(fileframe.name, dirpath_files) != fileframe.name) {
+            continue;
+        }
+
+        if (empty_dir) {
+            printf("Preview archive: \"%s\"\n", archivepath);
+            printf("Directory: \"%s\"\n", dirpath ? dirpath : "");
+            empty_dir = 0;
+        }
+
+        char* filename = fileframe.name + strlen(dirpath_files);
+        char* bs = strchr(filename, '/');
+        if (bs) {
+            filename[bs-filename] = '\0';
+            
+            if (prevdir) {
+                if (strcmp(prevdir, filename) == 0) {
+                    continue;
+                } else {
+                    free(prevdir);
+                    prevdir = NULL;
+                }
+            }
+            
+            if (!prevdir) {
+                prevdir = (char*)malloc(strlen(filename)+1);
+                strcpy(prevdir, filename);
+            }
+
+            printf("<DIR>  ");
+        } else {
+            printf("<FILE> ");
+        }
+
+        printf("%s\n", filename);
+    } while (next_fileframe(&fileframe));
+
+    if (empty_dir) {
+        printf("No such directory \"%s\" in \"%s\"\n", dirpath, archivepath);
+    }
+
+    if (prevdir) {
+        free(prevdir);
+    }
+
+    free(dirpath_files);
+    FileBufferIO_close(archive);
+
+    return 0;
+}

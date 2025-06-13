@@ -107,3 +107,34 @@ int check_files_similar(char* path1, char* path2) {
 
     return stat1.st_ino == stat2.st_ino;
 }
+
+int create_directories(const char *path) {
+    char* pp = NULL;
+    char* sp = NULL;
+
+    char* temp = (char*)malloc(strlen(path)+1);
+    if (!temp) {
+        fprintf(stderr, "Out of memory");
+        return 1;
+    }
+    strcpy(temp, path);
+
+    pp = temp;
+    while ((sp = strchr(pp, '/')) != NULL) {
+        if (sp != temp) { // не корневая директория "/"
+            *sp = '\0';
+            if (check_file_exist(temp) == 0) {
+                if (mkdir(temp, 0700) == -1) {
+                    perror("mkdir");
+                    free(temp);
+                    return 1;
+                }
+            }
+            *sp = '/';
+        }
+        pp = sp + 1;
+    }
+
+    free(temp);
+    return 0;
+}
