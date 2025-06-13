@@ -22,7 +22,8 @@ typedef struct {
     int count;
     int current;
     char* name;
-    uint64_t size;
+    uint64_t size_original;
+    uint64_t size_compressed;
     uint32_t treesize;
     uint64_t filestart;
     FileBufferIO* fb;
@@ -141,28 +142,30 @@ static HuffmanNode* fread_tree(FileBufferIO* stream_read, uint32_t treesize, uns
 
 
 // == Подготовка архива ==========================
-static long prepare_fileheader(FileBufferIO* archive, char* path) {
-   if (strncmp(path, "./", 2) == 0) {
-       path += 2;
-   }
+static long prepare_fileheader(FileBufferIO* archive, char* filepath, char* path_in_archive) {
+    if (strncmp(path_in_archive, "./", 2) == 0) {
+        path_in_archive += 2;
+    }
 
-   uint32_t filename_len = strlen(path)+1;
-   uint64_t compressed_filesize = 0;
-   uint32_t compressed_treesize = 0;
-   uint64_t filestart = 0;
+    uint32_t filename_len = strlen(path_in_archive)+1;
+    uint64_t compressed_filesize = 0;
+    uint32_t compressed_treesize = 0;
+    uint64_t filestart = 0;
 
-   archive->writebytes(archive, &filename_len, 0, sizeof(filename_len));
-   archive->writebytes(archive, path, 0, filename_len);
+    uint64_t original_filesize = get_filesize(filepath);
+    archive->writebytes(archive, &original_filesize, 0, sizeof(original_filesize));
+    archive->writebytes(archive, &filename_len, 0, sizeof(filename_len));
+    archive->writebytes(archive, path_in_archive, 0, filename_len);
 
-   long size_pos = ftell(archive->fp);
-   if (size_pos == -1) return -1;
-   size_pos = (size_pos + archive->byte_p) + 1;
+    long size_pos = ftell(archive->fp);
+    if (size_pos == -1) return -1;
+    size_pos = (size_pos + archive->byte_p) + 1;
 
-   archive->writebytes(archive, &compressed_filesize, 0, sizeof(compressed_filesize));
-   archive->writebytes(archive, &compressed_treesize, 0, sizeof(compressed_treesize));
-   archive->writebytes(archive, &filestart, 0, sizeof(filestart));
+    archive->writebytes(archive, &compressed_filesize, 0, sizeof(compressed_filesize));
+    archive->writebytes(archive, &compressed_treesize, 0, sizeof(compressed_treesize));
+    archive->writebytes(archive, &filestart, 0, sizeof(filestart));
 
-   return size_pos;
+    return size_pos;
 }
 
 // startpath - file or dir, which need to compress
@@ -204,7 +207,7 @@ static PreparedFiles prepare_fileheaders(FileBufferIO* archive, hlist* list, cha
         }*/
 
         if (strlen(addpath) == 0) {
-            long size_pos = prepare_fileheader(archive, get_filename(startpath));
+            long size_pos = prepare_fileheader(archive, path, get_filename(startpath));
             if (size_pos == -1) {
                 free(path);
                 fprintf(stderr, "Getting file position error\n");
@@ -221,7 +224,7 @@ static PreparedFiles prepare_fileheaders(FileBufferIO* archive, hlist* list, cha
             }
             strcpy(filepath, rootdir);
             strcat(filepath, addpath);
-            long size_pos = prepare_fileheader(archive, filepath);
+            long size_pos = prepare_fileheader(archive, path, filepath);
             free(filepath);
             if (size_pos == -1) {
                 free(path);
@@ -351,8 +354,15 @@ static FileFrame get_fileframe(FileBufferIO* archive, int count) {
     fileframe.count = count;
     fileframe.current = 1;
     fileframe.filestart = 0;
-    fileframe.size = 0;
+    fileframe.size_compressed = 0;
+    fileframe.size_original = 0;
     fileframe.treesize = 0;
+
+    if (!archive->readbytes(archive, &fileframe.size_original, 0, sizeof(fileframe.size_original))) {
+        fprintf(stderr, "EOF while reading headers\n");
+        fileframe.count = -1;
+        return fileframe;
+    }
 
     int filename_len = 0;
     if (!archive->readbytes(archive, &filename_len, 0, sizeof(filename_len))) {
@@ -374,7 +384,7 @@ static FileFrame get_fileframe(FileBufferIO* archive, int count) {
         fileframe.count = -1;
         return fileframe;
     }
-    if (!archive->readbytes(archive, &fileframe.size, 0, sizeof(fileframe.size))) {
+    if (!archive->readbytes(archive, &fileframe.size_compressed, 0, sizeof(fileframe.size_compressed))) {
         fprintf(stderr, "EOF while reading headers\n");
         end_fileframe(&fileframe);
         fileframe.count = -1;
@@ -405,6 +415,12 @@ static int next_fileframe(FileFrame* fileframe) {
     }
     fileframe->current++;
 
+    if (!archive->readbytes(archive, &fileframe->size_original, 0, sizeof(fileframe->size_original))) {
+        fprintf(stderr, "EOF while reading headers\n");
+        end_fileframe(fileframe);
+        return 0;
+    }
+
     unsigned int filename_len = 0;
     archive->readbytes(archive, &filename_len, 0, sizeof(filename_len));
     fileframe->name = (char*)calloc(filename_len, 1);
@@ -418,8 +434,8 @@ static int next_fileframe(FileFrame* fileframe) {
         end_fileframe(fileframe);
         return 0;
     }
-    fileframe->size = 0;
-    if (!archive->readbytes(archive, &fileframe->size, 0, sizeof(fileframe->size))) {
+    fileframe->size_compressed = 0;
+    if (!archive->readbytes(archive, &fileframe->size_compressed, 0, sizeof(fileframe->size_compressed))) {
         fprintf(stderr, "EOF while reading headers\n");
         end_fileframe(fileframe);
         return 0;
@@ -821,7 +837,7 @@ int decompress(char* archivepath, char* outdir, char** filepaths, int filepaths_
         }
 
         HuffmanNode* node_cur = tree;
-        for (unsigned long long i = 0; i < fileframe.size - fileframe.treesize; i++) {
+        for (unsigned long long i = 0; i < fileframe.size_compressed - fileframe.treesize; i++) {
             unsigned char bit = 0;
             size_t readed = 0;
             if (!(readed = archive->readbits(archive, &bit, 7, 1))) {
@@ -964,7 +980,29 @@ int show_files(char* archivepath, char* dirpath) {
             printf("<FILE> ");
         }
 
-        printf("%s\n", filename);
+        if (bs) {
+            printf("          %s\n", filename);
+            continue;
+        }
+
+        uint64_t filesize = fileframe.size_original;
+        char sizename = ' ';
+        if (filesize >= 1024) {
+            sizename = 'K';
+            filesize /= 1024;
+        } else if (filesize >= 1048576) {
+            sizename = 'M';
+            filesize /= 1048576;
+        } else if (filesize >= 1073741824) {
+            sizename = 'G';
+            filesize /= 1073741824;
+        }
+
+        if (sizename == ' ') {
+            printf("(%-4ld  B) %s\n", filesize, filename);
+        } else {
+            printf("(%-4ld %cB) %s\n", filesize, sizename, filename);
+        }
     } while (next_fileframe(&fileframe));
 
     if (empty_dir) {
