@@ -6,6 +6,9 @@
 // Size of words in bytes to compress/decompress
 extern uint8_t wordsize;
 
+// Skip warning about small files
+extern int add_small_files;
+
 // Compress files from paths and store them into archive on archivepath
 // returns 0 if success, else 1
 int compress(char** paths, int paths_count, char* archivepath);

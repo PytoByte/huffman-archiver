@@ -17,6 +17,7 @@ enum OptionType {
     OPTION_OUTPUT = 0,
     OPTION_WORDSIZE = 1,
     OPTION_DIR = 2,
+    OPTION_SKIPWARNING = 3,
     INVALID_OPTION
 };
 
@@ -29,6 +30,7 @@ typedef struct {
     char** dirs;
     int dirs_count;
     int wordsize;
+    int skip_warning;
 } Instruction;
 
 typedef struct Manual {
@@ -50,11 +52,11 @@ Manual options_manual[] = {
     {2, (const char*[]){"-output", "-o"}, "Specify path for command", "-output <file|dir>"},
     {2, (const char*[]){"-word", "-w"}, "Specify word size in bytes (from 1 to 3)", "-word <number>"},
     {1, (const char*[]){"-dir"}, "Specify directory inside archive", "-dir <path>"},
+    {2, (const char*[]){"-skipwarning", "-sw"}, "Skip warning about small files", "-skipwarning"},
     {0, NULL, NULL, NULL}
 };
 
 void command_help(char* program_name) {
-    printf("Usage: %s <command> [options] [arguments]\n\n", program_name);
     printf("Commands:\n");
     for (int i = 0; commands_manual[i].aliases_count != 0; i++) {
         printf("  ");
@@ -118,7 +120,7 @@ void free_instruction(Instruction ins) {
 }
 
 Instruction parse_instruction(int argc, char** argv) {
-    Instruction instruction = {INVALID_COMMAND, NULL, NULL, NULL, 0, NULL, 0, 1};
+    Instruction instruction = {INVALID_COMMAND, NULL, NULL, NULL, 0, NULL, 0, 1, 0};
 
     instruction.files = (char**)malloc(argc * sizeof(char*));
     if (!instruction.files) {
@@ -266,6 +268,16 @@ Instruction parse_instruction(int argc, char** argv) {
             return instruction;
         }
 
+        check = check_flag(argv[i], options_manual[OPTION_SKIPWARNING].aliases, options_manual[OPTION_SKIPWARNING].aliases_count);
+        if (check == 1) {
+            instruction.skip_warning = 1;
+            continue;
+        } else if (check == -1) {
+            instruction.cmd = PARSER_ERROR;
+            free_instruction(instruction);
+            return instruction;
+        }
+
         instruction.files[instruction.files_count++] = argv[i];
     }
 
@@ -288,6 +300,7 @@ int main(int argc, char* argv[]) {
         command_help(argv[0]);
     } else if (ins.cmd == COMPRESS) {
         wordsize = ins.wordsize;
+        add_small_files = ins.skip_warning;
 
         int flag;
         if (!ins.out) {

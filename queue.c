@@ -9,8 +9,9 @@ Queue *queue_create() {
     return queue;
 }
 
-void queue_enqueue(Queue *queue, void *value) {
+int queue_enqueue(Queue *queue, void *value) {
 	QueueElem* new = (QueueElem*)malloc(sizeof(QueueElem));
+    if (!new) return 1;
     new->value = value;
     new->next = NULL;
 
@@ -20,6 +21,8 @@ void queue_enqueue(Queue *queue, void *value) {
     } else {
         queue->last->next = new;
     }
+
+    return 0;
 }
 
 void* queue_dequeue(Queue *queue) {

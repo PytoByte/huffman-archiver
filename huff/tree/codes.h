@@ -17,16 +17,13 @@ typedef struct {
     size_t size;
 } Codes;
 
+// Converts a word to its index in the codes array
 int wordtoi(const uint8_t* word);
 
-void Codes_free(Codes codes);
+// Converts an index of the codes array to a word
+void itoword(const int index, uint8_t* word);
 
-// Заполняет список кодов по дереву
-// tree - дерево
-// codes - список кодов (заполняется)
-// curcode - текущий код
-// codesize - размер текущего кода в битах
-char Codes_build_reqursion(HuffmanNode* tree, Code* codes, uint8_t* curcode, unsigned char codesize);
+void Codes_free(Codes codes);
 
 // Runs build_codes_reqursion
 // !!! Don't forget to free the returned string !!!

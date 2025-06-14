@@ -17,6 +17,7 @@
 #include "huff/tree/codes.h"
 
 uint8_t wordsize = 1;
+int add_small_files = 0;
 
 typedef struct {
     int count;
@@ -27,31 +28,35 @@ typedef struct {
     uint32_t treesize;
     uint64_t filestart;
     FileBufferIO* fb;
-} FileFrame;
+} HeaderFrame;
 
+// == Result structures ==
 typedef struct {
     uint64_t original;
     uint64_t compressed;
-} FileSize;
+} FileSizeResult;
 
 typedef struct {
     Queue* files;
     unsigned long long total_size;
     int count;
-} CompressingFiles;
+} CompressingFilesResult;
 
 typedef struct {
     char* path;
     long long size_pos;
-} CompressingFile;
+} CompressingFileResult;
 
 typedef struct {
     int added;
     unsigned long long filesize;
-} PreparedFiles;
+} PreparedFilesResult;
+// == Result structures ==
 
-CompressingFile* CompressingFile_create(char* path, long long size_pos) {
-    CompressingFile* file = (CompressingFile*)malloc(sizeof(CompressingFile));
+// create a CompressingFileResult with the given parameters
+// !!! After use, run "CompressingFileResult_free" if non-null !!!
+CompressingFileResult* CompressingFileResult_create(char* path, long long size_pos) {
+    CompressingFileResult* file = (CompressingFileResult*)malloc(sizeof(CompressingFileResult));
     if (!file) {
         return NULL;
     }
@@ -67,16 +72,13 @@ CompressingFile* CompressingFile_create(char* path, long long size_pos) {
     return file;
 }
 
-void CompressingFile_free(void* ptr) {
-    CompressingFile* file = (CompressingFile*)ptr;
+void CompressingFileResult_free(void* ptr) {
+    CompressingFileResult* file = (CompressingFileResult*)ptr;
     free(file->path);
     free(file);
 }
 
-// == Чтение и запись дерева (префиксная форма) ==
-// Запись дерева в префиксной форме
-// tree - дерево
-// stream_write - поток вывода
+// == Reading and writing a huffman tree (prefix form) ==
 static size_t fwrite_tree(HuffmanNode* tree, FileBufferIO* stream_write) {
     size_t tree_size = 0;
     if (tree->left == NULL && tree->right == NULL) {
@@ -98,9 +100,8 @@ static size_t fwrite_tree(HuffmanNode* tree, FileBufferIO* stream_write) {
     return tree_size;
 }
 
-// Чтение дерева из файла
-// stream_read - поток ввода
-// ! Возвращаемое значение требует очистки !
+// Returns tree if successful, NULL if failed
+// !!! After use, run "HuffmanNode_freetree" if non-null !!!
 static HuffmanNode* fread_tree(FileBufferIO* stream_read, uint32_t treesize, unsigned int readed) {
     if (readed > treesize) {
         fprintf(stderr, "Corrupted huffman tree - out of bounds\n");
@@ -165,11 +166,11 @@ static HuffmanNode* fread_tree(FileBufferIO* stream_read, uint32_t treesize, uns
 
     return node;
 }
-// == Чтение и запись дерева (префиксная форма) ==
+// == Reading and writing a huffman tree (prefix form) ==
 
 
 
-// == Подготовка архива ==========================
+// == Writing headers ============================
 static long prepare_fileheader(FileBufferIO* archive, char* filepath, char* path_in_archive) {
     if (strncmp(path_in_archive, "./", 2) == 0) {
         path_in_archive += 2;
@@ -198,11 +199,11 @@ static long prepare_fileheader(FileBufferIO* archive, char* filepath, char* path
 
 // startpath - file or dir, which need to compress
 // addpath - if startpath if folder, when addpath stores subdirs of start folder
-static PreparedFiles prepare_fileheaders(FileBufferIO* archive, Queue* queue, char* startpath, char* addpath) {
+static PreparedFilesResult prepare_headers(FileBufferIO* archive, Queue* queue, char* startpath, char* addpath) {
     char* path = (char*)malloc(strlen(startpath) + strlen(addpath) + 1);
     if (!path) {
         fprintf(stderr, "Out of memory\n");
-        return (PreparedFiles){-1, 0};
+        return (PreparedFilesResult){-1, 0};
     }
 
     strcpy(path, startpath);
@@ -211,50 +212,57 @@ static PreparedFiles prepare_fileheaders(FileBufferIO* archive, Queue* queue, ch
     if (check_files_similar(archive->path, path)) {
         fprintf(stderr, "WARNING: Skipping archive itself\n");
         free(path);
-        return (PreparedFiles){0, 0};
+        return (PreparedFilesResult){0, 0};
     }
 
     struct stat file_stat;
     if (stat(path, &file_stat) == -1) {
         perror("stat error");
         free(path);
-        return (PreparedFiles){-1, 0};
+        return (PreparedFilesResult){-1, 0};
     }
 
     if (S_ISREG(file_stat.st_mode)) {
         size_t filesize = get_filesize(path);
-        /*if (filesize < 512) {
-            printf("WARNING \"%s\" (%ld bytes)\n", get_filename(path), filesize);
-            printf("File too small, it may be bigger after compressing\n");
-            printf("Skip this file? (y/default n) ");
-            if (getchar() == 'y') {
-                free(path);
-                return 0;
-            };
-            printf("\n");
-        }*/
+        if (!add_small_files) {
+            if (filesize < 512) {
+                printf("WARNING \"%s\" (%ld bytes)\n", get_filename(path), filesize);
+                printf("File too small, it may be bigger after compressing\n");
+                printf("Skip this file? (y/default n) ");
+                if (getchar() == 'y') {
+                    free(path);
+                    return (PreparedFilesResult){0, 0};
+                };
+                printf("\n");
+            }
+        }
 
-        if (strlen(addpath) == 0) {
+        if (strlen(addpath) == 0) { // If just compressing file
             long size_pos = prepare_fileheader(archive, path, get_filename(startpath));
             if (size_pos == -1) {
                 free(path);
                 fprintf(stderr, "Getting file position error\n");
-                return (PreparedFiles){-1, 0};
+                return (PreparedFilesResult){-1, 0};
             }
-            CompressingFile* file = CompressingFile_create(path, size_pos);
-            if (!file) {
+            CompressingFileResult* compr_file = CompressingFileResult_create(path, size_pos);
+            if (!compr_file) {
                 free(path);
                 fprintf(stderr, "Out of memory\n");
-                return (PreparedFiles){-1, 0};
+                return (PreparedFilesResult){-1, 0};
             }
-            queue_enqueue(queue, file);
-        } else {
+            if (queue_enqueue(queue, compr_file)) {
+                fprintf(stderr, "Out of memory\n");
+                free(path);
+                CompressingFileResult_free(compr_file);
+                return (PreparedFilesResult){-1, 0};
+            };
+        } else { // If compressing file in compressing folder
             char* rootdir = get_filename(startpath);
             char* filepath = (char*)malloc(strlen(rootdir) + strlen(addpath) + 1);
             if (!filepath) {
                 fprintf(stderr, "Out of memory\n");
                 free(path);
-                return (PreparedFiles){-1, 0};
+                return (PreparedFilesResult){-1, 0};
             }
             strcpy(filepath, rootdir);
             strcat(filepath, addpath);
@@ -264,26 +272,31 @@ static PreparedFiles prepare_fileheaders(FileBufferIO* archive, Queue* queue, ch
                 free(path);
                 free(filepath);
                 fprintf(stderr, "Getting file position error\n");
-                return (PreparedFiles){-1, 0};
+                return (PreparedFilesResult){-1, 0};
             }
-            CompressingFile* file = CompressingFile_create(path, size_pos);
-            if (!file) {
+            CompressingFileResult* compr_file = CompressingFileResult_create(path, size_pos);
+            if (!compr_file) {
                 free(path);
                 free(filepath);
                 fprintf(stderr, "Out of memory\n");
-                return (PreparedFiles){-1, 0};
+                return (PreparedFilesResult){-1, 0};
             }
-            queue_enqueue(queue, file);
+            if (queue_enqueue(queue, compr_file)) {
+                fprintf(stderr, "Out of memory\n");
+                free(path);
+                CompressingFileResult_free(compr_file);
+                return (PreparedFilesResult){-1, 0};
+            };
         }
         free(path);
-        return (PreparedFiles){1, filesize};
+        return (PreparedFilesResult){1, filesize};
     }
 
     if (!S_ISDIR(file_stat.st_mode)) {
         free(path);
         pg_end();
         fprintf(stderr, "Unsupported file \"%s\"\n", path);
-        return (PreparedFiles){0, 0};
+        return (PreparedFilesResult){0, 0};
     }
 
     DIR *dir;
@@ -293,10 +306,10 @@ static PreparedFiles prepare_fileheaders(FileBufferIO* archive, Queue* queue, ch
     if (dir == NULL) {
         perror("Open dir error");
         free(path);
-        return (PreparedFiles){0, 0};
+        return (PreparedFilesResult){0, 0};
     }
 
-    PreparedFiles files = {0, 0};
+    PreparedFilesResult files = {0, 0};
     while ((entry = readdir(dir)) != NULL) {
         if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
             continue;
@@ -305,7 +318,7 @@ static PreparedFiles prepare_fileheaders(FileBufferIO* archive, Queue* queue, ch
         char* new_addpath = (char*)malloc(strlen(addpath) + strlen(entry->d_name) + 2);
         sprintf(new_addpath, "%s/%s", addpath, entry->d_name);
 
-        PreparedFiles temp = prepare_fileheaders(archive, queue, startpath, new_addpath);
+        PreparedFilesResult temp = prepare_headers(archive, queue, startpath, new_addpath);
         files.added += temp.added;
         files.filesize += temp.filesize;
 
@@ -329,8 +342,8 @@ static void archive_write_filesize(FileBufferIO* archive, long size_pos, uint64_
 
 // Бронирует место для заголовков в начале архива
 // Возвращает список файлов и указателей для сжания и заполнения заголовков
-static CompressingFiles prepare_headers(FileBufferIO* archive, int paths_c, char** paths) {
-    CompressingFiles compr_files;
+static CompressingFilesResult prepare_archive(FileBufferIO* archive, int paths_c, char** paths) {
+    CompressingFilesResult compr_files;
     
     compr_files.files = queue_create();
     compr_files.count = 0;
@@ -339,9 +352,9 @@ static CompressingFiles prepare_headers(FileBufferIO* archive, int paths_c, char
     archive->writebytes(archive, &wordsize, 0, sizeof(wordsize));
 
     for (int i = 0; i < paths_c; i++) {
-        PreparedFiles temp = prepare_fileheaders(archive, compr_files.files, paths[i], "");
+        PreparedFilesResult temp = prepare_headers(archive, compr_files.files, paths[i], "");
         if (temp.added == -1) {
-            queue_destroy(&compr_files.files, CompressingFile_free);
+            queue_destroy(&compr_files.files, CompressingFileResult_free);
             compr_files.count = 0;
             return compr_files;
         }
@@ -354,14 +367,14 @@ static CompressingFiles prepare_headers(FileBufferIO* archive, int paths_c, char
     long original_pos = ftell(archive->fp);
     if (original_pos == -1) {
         fprintf(stderr, "Getting file position error\n");
-        queue_destroy(&compr_files.files, CompressingFile_free);
+        queue_destroy(&compr_files.files, CompressingFileResult_free);
         compr_files.count = 0;
         return compr_files;
     }
     
     if (fseek(archive->fp, 0, SEEK_SET) != 0) {
         fprintf(stderr, "Fseek error\n");
-        queue_destroy(&compr_files.files, CompressingFile_free);
+        queue_destroy(&compr_files.files, CompressingFileResult_free);
         compr_files.count = 0;
         return compr_files;
     }
@@ -370,135 +383,135 @@ static CompressingFiles prepare_headers(FileBufferIO* archive, int paths_c, char
 
     if (fseek(archive->fp, original_pos, SEEK_SET) != 0) {
         fprintf(stderr, "Fseek error\n");
-        queue_destroy(&compr_files.files, CompressingFile_free);
+        queue_destroy(&compr_files.files, CompressingFileResult_free);
         compr_files.count = 0;
         return compr_files;
     }
 
     return compr_files;
 }
-// == Подготовка архива ==========================
+// == Writing headers ============================
 
 
-// == Получение файлов из архива =================
-static void end_fileframe(FileFrame* fileframe) {
-    free(fileframe->name);
-    fileframe->current = fileframe->count;
+// == HeaderFrame ================================
+static void end_header_frame(HeaderFrame* header_frame) {
+    free(header_frame->name);
+    header_frame->current = header_frame->count;
 }
 
-static FileFrame get_fileframe(FileBufferIO* archive, int count) {
-    FileFrame fileframe;
-    fileframe.fb = archive;
-    fileframe.count = count;
-    fileframe.current = 1;
-    fileframe.filestart = 0;
-    fileframe.size_compressed = 0;
-    fileframe.size_original = 0;
-    fileframe.treesize = 0;
+static HeaderFrame get_header_frame(FileBufferIO* archive, int count) {
+    HeaderFrame header_frame;
+    header_frame.fb = archive;
+    header_frame.count = count;
+    header_frame.current = 1;
+    header_frame.filestart = 0;
+    header_frame.size_compressed = 0;
+    header_frame.size_original = 0;
+    header_frame.treesize = 0;
 
-    if (!archive->readbytes(archive, &fileframe.size_original, 0, sizeof(fileframe.size_original))) {
+    if (!archive->readbytes(archive, &header_frame.size_original, 0, sizeof(header_frame.size_original))) {
         fprintf(stderr, "EOF while reading headers\n");
-        fileframe.count = -1;
-        return fileframe;
+        header_frame.count = -1;
+        return header_frame;
     }
 
     int filename_len = 0;
     if (!archive->readbytes(archive, &filename_len, 0, sizeof(filename_len))) {
         fprintf(stderr, "EOF while reading headers\n");
-        fileframe.count = -1;
-        return fileframe;
+        header_frame.count = -1;
+        return header_frame;
     }
 
-    fileframe.name = (char*)malloc(filename_len);
-    if (!fileframe.name) {
+    header_frame.name = (char*)malloc(filename_len);
+    if (!header_frame.name) {
         fprintf(stderr, "Out of memory\n");
-        fileframe.count = -1;
-        return fileframe;
+        header_frame.count = -1;
+        return header_frame;
     }
 
-    if (!archive->readbytes(archive, fileframe.name, 0, filename_len)) {
+    if (!archive->readbytes(archive, header_frame.name, 0, filename_len)) {
         fprintf(stderr, "EOF while reading headers\n");
-        end_fileframe(&fileframe);
-        fileframe.count = -1;
-        return fileframe;
+        end_header_frame(&header_frame);
+        header_frame.count = -1;
+        return header_frame;
     }
-    if (!archive->readbytes(archive, &fileframe.size_compressed, 0, sizeof(fileframe.size_compressed))) {
+    if (!archive->readbytes(archive, &header_frame.size_compressed, 0, sizeof(header_frame.size_compressed))) {
         fprintf(stderr, "EOF while reading headers\n");
-        end_fileframe(&fileframe);
-        fileframe.count = -1;
-        return fileframe;
+        end_header_frame(&header_frame);
+        header_frame.count = -1;
+        return header_frame;
     }
-    if (!archive->readbytes(archive, &fileframe.treesize, 0, sizeof(fileframe.treesize))) {
+    if (!archive->readbytes(archive, &header_frame.treesize, 0, sizeof(header_frame.treesize))) {
         fprintf(stderr, "EOF while reading headers\n");
-        end_fileframe(&fileframe);
-        fileframe.count = -1;
-        return fileframe;
+        end_header_frame(&header_frame);
+        header_frame.count = -1;
+        return header_frame;
     }
-    if (!archive->readbytes(archive, &fileframe.filestart, 0, sizeof(fileframe.filestart))) {
+    if (!archive->readbytes(archive, &header_frame.filestart, 0, sizeof(header_frame.filestart))) {
         fprintf(stderr, "EOF while reading headers\n");
-        end_fileframe(&fileframe);
-        fileframe.count = -1;
-        return fileframe;
+        end_header_frame(&header_frame);
+        header_frame.count = -1;
+        return header_frame;
     }
 
-    return fileframe;
+    return header_frame;
 }
 
-static int next_fileframe(FileFrame* fileframe) {
-    FileBufferIO* archive = fileframe->fb;
+static int next_header_frame(HeaderFrame* header_frame) {
+    FileBufferIO* archive = header_frame->fb;
 
-    free(fileframe->name);
-    if (fileframe->current == fileframe->count) {
+    free(header_frame->name);
+    if (header_frame->current == header_frame->count) {
         return 0;
     }
-    fileframe->current++;
+    header_frame->current++;
 
-    if (!archive->readbytes(archive, &fileframe->size_original, 0, sizeof(fileframe->size_original))) {
+    if (!archive->readbytes(archive, &header_frame->size_original, 0, sizeof(header_frame->size_original))) {
         fprintf(stderr, "EOF while reading headers\n");
-        end_fileframe(fileframe);
+        end_header_frame(header_frame);
         return 0;
     }
 
     unsigned int filename_len = 0;
     archive->readbytes(archive, &filename_len, 0, sizeof(filename_len));
-    fileframe->name = (char*)calloc(filename_len, 1);
-    if (fileframe->name == NULL) {
+    header_frame->name = (char*)calloc(filename_len, 1);
+    if (header_frame->name == NULL) {
         fprintf(stderr, "Out of memory\n");
         return 0;
     }
 
-    if (!archive->readbytes(archive, fileframe->name, 0, filename_len)) {
+    if (!archive->readbytes(archive, header_frame->name, 0, filename_len)) {
         fprintf(stderr, "EOF while reading headers\n");
-        end_fileframe(fileframe);
+        end_header_frame(header_frame);
         return 0;
     }
-    fileframe->size_compressed = 0;
-    if (!archive->readbytes(archive, &fileframe->size_compressed, 0, sizeof(fileframe->size_compressed))) {
+    header_frame->size_compressed = 0;
+    if (!archive->readbytes(archive, &header_frame->size_compressed, 0, sizeof(header_frame->size_compressed))) {
         fprintf(stderr, "EOF while reading headers\n");
-        end_fileframe(fileframe);
+        end_header_frame(header_frame);
         return 0;
     }
-    fileframe->treesize = 0;
-    if (!archive->readbytes(archive, &fileframe->treesize, 0, sizeof(fileframe->treesize))) {
+    header_frame->treesize = 0;
+    if (!archive->readbytes(archive, &header_frame->treesize, 0, sizeof(header_frame->treesize))) {
         fprintf(stderr, "EOF while reading headers\n");
-        end_fileframe(fileframe);
+        end_header_frame(header_frame);
         return 0;
     }
-    fileframe->filestart = 0;
-    if (!archive->readbytes(archive, &fileframe->filestart, 0, sizeof(fileframe->filestart))) {
+    header_frame->filestart = 0;
+    if (!archive->readbytes(archive, &header_frame->filestart, 0, sizeof(header_frame->filestart))) {
         fprintf(stderr, "EOF while reading headers\n");
-        end_fileframe(fileframe);
+        end_header_frame(header_frame);
         return 0;
     }
 
     return 1;
 }
-// == Получение файлов из архива =================
+// == HeaderFrame ================================
 
 
 // == Сжатие файлов ==============================
-static FileSize compress_file(FileBufferIO* archive, const char* path, long size_pos) {
-    FileSize filesize;
+static FileSizeResult compress_file(FileBufferIO* archive, const char* path, long size_pos) {
+    FileSizeResult filesize;
     filesize.compressed = 0;
     filesize.original = get_filesize(path);
     if (filesize.original == 0) {
@@ -566,11 +579,7 @@ static FileSize compress_file(FileBufferIO* archive, const char* path, long size
         if (freqs[i]==0) {
             continue;
         }
-        memcpy(word, &i, wordsize);
-        //printf("%d\n", word[0]); // DEBUG
-        //printf("extracted word from %d: ", i); // DEBUG
-        //printbinary(word, wordsize*8); // DEBUG
-        //printf("\n"); // DEBUG
+        itoword(i, word);
         
         HuffmanNode* node = HuffmanNode_create(wordsize*8, word, freqs[i], NULL, NULL);
         if (!node) {
@@ -669,7 +678,7 @@ int compress(char** paths, int paths_count, char* archivepath) {
     }
     
     // Prepare archive headers
-    CompressingFiles compr_files = prepare_headers(archive, paths_count, paths); 
+    CompressingFilesResult compr_files = prepare_archive(archive, paths_count, paths); 
     if (compr_files.files == NULL) {
         free(unique_archivepath);
         FileBufferIO_close(archive);
@@ -677,38 +686,38 @@ int compress(char** paths, int paths_count, char* archivepath) {
     } else if (compr_files.count == 0) {
         fprintf(stderr, "Nothing to compress\n");
         free(unique_archivepath);
-        queue_destroy(&compr_files.files, CompressingFile_free);
+        queue_destroy(&compr_files.files, CompressingFileResult_free);
         FileBufferIO_close(archive);
         return 1;
     }
 
-    FileSize filesize_total = {.original = 0, .compressed = 0};
+    FileSizeResult filesize_total = {.original = 0, .compressed = 0};
 
     pg_init(compr_files.count + compr_files.total_size*16, 0);
 
-    CompressingFile* compr_file = (CompressingFile*)queue_dequeue(compr_files.files);
+    CompressingFileResult* compr_file = (CompressingFileResult*)queue_dequeue(compr_files.files);
     while (compr_file != NULL) {
         // Сhecking if file is archive
         if (strcmp(get_filename(compr_file->path), unique_archivepath) == 0) {
-            CompressingFile_free(compr_file);
+            CompressingFileResult_free(compr_file);
             continue;
         }
-        FileSize filesize = compress_file(archive, compr_file->path, compr_file->size_pos);
+        FileSizeResult filesize = compress_file(archive, compr_file->path, compr_file->size_pos);
         if (filesize.compressed == 0 && filesize.original != 0) {
             pg_end();
             fprintf(stderr, "Error while compressing %s\n", compr_file->path);
             free(unique_archivepath);
-            CompressingFile_free(compr_file);
-            queue_destroy(&compr_files.files, CompressingFile_free);
+            CompressingFileResult_free(compr_file);
+            queue_destroy(&compr_files.files, CompressingFileResult_free);
             return 1;
         }
         filesize_total.original += filesize.original;
         pg_update(1);
 
-        CompressingFile_free(compr_file);
-        compr_file = (CompressingFile*)queue_dequeue(compr_files.files);
+        CompressingFileResult_free(compr_file);
+        compr_file = (CompressingFileResult*)queue_dequeue(compr_files.files);
     }
-    queue_destroy(&compr_files.files, CompressingFile_free);
+    queue_destroy(&compr_files.files, CompressingFileResult_free);
     pg_end();
 
     FileBufferIO_close(archive);
@@ -753,8 +762,8 @@ int decompress(char* archivepath, char* outdir, char** filepaths, int filepaths_
         return 1;
     }
 
-    FileFrame fileframe = get_fileframe(archive_frame, files_count);
-    if (fileframe.count == -1) {
+    HeaderFrame header_frame = get_header_frame(archive_frame, files_count);
+    if (header_frame.count == -1) {
         FileBufferIO_close(archive);
         FileBufferIO_close(archive_frame);
         return 1;
@@ -768,13 +777,13 @@ int decompress(char* archivepath, char* outdir, char** filepaths, int filepaths_
     int lastdir_ind = -1;
     do {
         // cutted_filepath pointer may be moved forward, to cut non-required directories
-        char* cutted_filepath = fileframe.name;
+        char* cutted_filepath = header_frame.name;
 
         // If filter is set
         if (filepaths_count+dirpaths_count > 0) {
             int flag_match = 0;
 
-            if (lastdir_ind > 0 && strstr(fileframe.name, dirpaths[lastdir_ind]) == fileframe.name) {
+            if (lastdir_ind > 0 && strstr(header_frame.name, dirpaths[lastdir_ind]) == header_frame.name) {
                 flag_match = 1;
                 
                 cutted_filepath += get_filename(dirpaths[lastdir_ind])-dirpaths[lastdir_ind];
@@ -784,7 +793,7 @@ int decompress(char* archivepath, char* outdir, char** filepaths, int filepaths_
 
             // check dir match
             for (int i = 0; i < dirpaths_count && dirpaths_remain > 0 && !flag_match; i++) {
-                if (strstr(fileframe.name, dirpaths[i]) == fileframe.name) {
+                if (strstr(header_frame.name, dirpaths[i]) == header_frame.name) {
                     flag_match = 1;
                     lastdir_ind = i;
                     dirpaths_remain--;
@@ -798,11 +807,11 @@ int decompress(char* archivepath, char* outdir, char** filepaths, int filepaths_
             // check file match
             // if file found in required directory earlier, it skips
             for (int i = 0; i < filepaths_count && filepaths_remain && !flag_match > 0; i++) {
-                if (strstr(fileframe.name, filepaths[i]) != fileframe.name) {
+                if (strstr(header_frame.name, filepaths[i]) != header_frame.name) {
                     continue;
                 }
 
-                if (strcmp(get_filename(fileframe.name), get_filename(filepaths[i])) == 0) {
+                if (strcmp(get_filename(header_frame.name), get_filename(filepaths[i])) == 0) {
                     flag_match = 1;
                     filepaths_remain--;
                     cutted_filepath = get_filename(cutted_filepath);
@@ -813,24 +822,24 @@ int decompress(char* archivepath, char* outdir, char** filepaths, int filepaths_
             if (!flag_match) continue;
         }
 
-        int fs = fseek(archive->fp, fileframe.filestart / 8, SEEK_SET);
+        int fs = fseek(archive->fp, header_frame.filestart / 8, SEEK_SET);
         if (fs != 0) {
             pg_end();
             fprintf(stderr, "Fseek error\n");
-            end_fileframe(&fileframe);
+            end_header_frame(&header_frame);
             FileBufferIO_close(archive);
             FileBufferIO_close(archive_frame);
             return 1;
         }
 
         nextbuffer(archive);
-        archive->bit_p = fileframe.filestart % 8;
+        archive->bit_p = header_frame.filestart % 8;
 
         char* path = (char*)malloc(strlen(outdir) + strlen(cutted_filepath) + 2);
         if (!path) {
             pg_end();
             fprintf(stderr, "Out of memory\n");
-            end_fileframe(&fileframe);
+            end_header_frame(&header_frame);
             FileBufferIO_close(archive);
             FileBufferIO_close(archive_frame);
             return 1;
@@ -839,7 +848,7 @@ int decompress(char* archivepath, char* outdir, char** filepaths, int filepaths_
         if (create_directories(path) != 0) {
             pg_end();
             free(path);
-            end_fileframe(&fileframe);
+            end_header_frame(&header_frame);
             FileBufferIO_close(archive);
             FileBufferIO_close(archive_frame);
             return 1;
@@ -849,7 +858,7 @@ int decompress(char* archivepath, char* outdir, char** filepaths, int filepaths_
         free(path);
         if (!unique_path) {
             pg_end();
-            end_fileframe(&fileframe);
+            end_header_frame(&header_frame);
             FileBufferIO_close(archive);
             FileBufferIO_close(archive_frame);
             return 1;
@@ -858,22 +867,22 @@ int decompress(char* archivepath, char* outdir, char** filepaths, int filepaths_
         if (!file_decompress) {
             pg_end();
             free(unique_path);
-            end_fileframe(&fileframe);
+            end_header_frame(&header_frame);
             FileBufferIO_close(archive);
             FileBufferIO_close(archive_frame);
             return 1;
         }
         free(unique_path);
 
-        if (fileframe.treesize == 0) {
+        if (header_frame.treesize == 0) {
             FileBufferIO_close(file_decompress);
             continue;
         }
 
-        HuffmanNode* tree = fread_tree(archive, fileframe.treesize, 0);
+        HuffmanNode* tree = fread_tree(archive, header_frame.treesize, 0);
         if (!tree) {
             pg_end();
-            end_fileframe(&fileframe);
+            end_header_frame(&header_frame);
             FileBufferIO_close(archive);
             FileBufferIO_close(archive_frame);
             FileBufferIO_close(file_decompress);
@@ -881,13 +890,13 @@ int decompress(char* archivepath, char* outdir, char** filepaths, int filepaths_
         }
 
         HuffmanNode* node_cur = tree;
-        for (unsigned long long i = 0; i < fileframe.size_compressed - fileframe.treesize; i++) {
+        for (unsigned long long i = 0; i < header_frame.size_compressed - header_frame.treesize; i++) {
             unsigned char bit = 0;
             size_t readed = 0;
             if (!(readed = archive->readbits(archive, &bit, 7, 1))) {
                 pg_end();
                 fprintf(stderr, "EOF while decompressing\n");
-                end_fileframe(&fileframe);
+                end_header_frame(&header_frame);
                 FileBufferIO_close(archive);
                 FileBufferIO_close(archive_frame);
                 FileBufferIO_close(file_decompress);
@@ -902,7 +911,7 @@ int decompress(char* archivepath, char* outdir, char** filepaths, int filepaths_
                 } else {
                     pg_end();
                     fprintf(stderr, "Corrupted huffman tree - unexpected bit\n");
-                    end_fileframe(&fileframe);
+                    end_header_frame(&header_frame);
                     FileBufferIO_close(archive);
                     FileBufferIO_close(archive_frame);
                     FileBufferIO_close(file_decompress);
@@ -920,7 +929,7 @@ int decompress(char* archivepath, char* outdir, char** filepaths, int filepaths_
             if (!node_cur) {
                 pg_end();
                 fprintf(stderr, "Corrupted huffman tree or file\n");
-                end_fileframe(&fileframe);
+                end_header_frame(&header_frame);
                 FileBufferIO_close(archive);
                 FileBufferIO_close(archive_frame);
                 FileBufferIO_close(file_decompress);
@@ -937,7 +946,7 @@ int decompress(char* archivepath, char* outdir, char** filepaths, int filepaths_
 
         HuffmanNode_freetree(tree);
         FileBufferIO_close(file_decompress);
-    } while (next_fileframe(&fileframe));
+    } while (next_header_frame(&header_frame));
 
     FileBufferIO_close(archive);
     FileBufferIO_close(archive_frame);
@@ -980,8 +989,8 @@ int show_files(char* archivepath, char* dirpath) {
         return 1;
     }
 
-    FileFrame fileframe = get_fileframe(archive, files_count);
-    if (fileframe.count == -1) {
+    HeaderFrame header_frame = get_header_frame(archive, files_count);
+    if (header_frame.count == -1) {
         free(dirpath_files);
         FileBufferIO_close(archive);
         return 1;
@@ -990,7 +999,7 @@ int show_files(char* archivepath, char* dirpath) {
     char empty_dir = 1;
     char* prevdir = NULL;
     do {
-        if (strstr(fileframe.name, dirpath_files) != fileframe.name) {
+        if (strstr(header_frame.name, dirpath_files) != header_frame.name) {
             continue;
         }
 
@@ -1000,7 +1009,7 @@ int show_files(char* archivepath, char* dirpath) {
             empty_dir = 0;
         }
 
-        char* filename = fileframe.name + strlen(dirpath_files);
+        char* filename = header_frame.name + strlen(dirpath_files);
         char* bs = strchr(filename, '/');
         if (bs) {
             filename[bs-filename] = '\0';
@@ -1029,7 +1038,7 @@ int show_files(char* archivepath, char* dirpath) {
             continue;
         }
 
-        uint64_t filesize = fileframe.size_original;
+        uint64_t filesize = header_frame.size_original;
         char sizename = ' ';
         if (filesize >= 1024) {
             sizename = 'K';
@@ -1047,7 +1056,7 @@ int show_files(char* archivepath, char* dirpath) {
         } else {
             printf("(%-4ld %cB) %s\n", filesize, sizename, filename);
         }
-    } while (next_fileframe(&fileframe));
+    } while (next_header_frame(&header_frame));
 
     if (empty_dir) {
         printf("No such directory \"%s\" in \"%s\"\n", dirpath, archivepath);

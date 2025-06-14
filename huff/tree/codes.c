@@ -20,15 +20,18 @@ void Codes_free(Codes codes) {
     free(codes.codes);
 }
 
-// Заполняет список кодов по дереву
-// tree - дерево
-// codes - список кодов (заполняется)
-// curcode - текущий код
-// codesize - размер текущего кода в битах
-char Codes_build_reqursion(HuffmanNode* tree, Code* codes, uint8_t* curcode, unsigned char codesize) {
+void itoword(const int index, uint8_t* word) {
+    memcpy(word, &index, wordsize);
+}
+
+// Fills codes from Huffman tree
+// codes - list where codes will be stored
+// set curcode = 0 and codesize = 0 to start recursion
+// Returns 0 on success, else 1
+static char Codes_build_reqursion(HuffmanNode* tree, Code* codes, uint8_t* curcode, unsigned char codesize) {
     if ((tree->left == NULL && tree->right != NULL) || (tree->left != NULL && tree->right == NULL)) {
         fprintf(stderr, "Corrupted huffman tree\n");
-        return -1;
+        return 1;
     }
 
     unsigned int codesize_bytes = codesize / 8 + (codesize % 8 > 0);
@@ -40,7 +43,7 @@ char Codes_build_reqursion(HuffmanNode* tree, Code* codes, uint8_t* curcode, uns
         codes[(1 << (wordsize*8))].code = (uint8_t*)malloc(codesize_bytes);
         if (!codes[(1 << (wordsize*8))].code) {
             fprintf(stderr, "Out of memory\n");
-            return -1;
+            return 1;
         }
         //printf("Setting code last %d\n", 1 << (wordsize*8)); // DEBUG
         codes[(1 << (wordsize*8))].code[0] = 0;
@@ -52,7 +55,7 @@ char Codes_build_reqursion(HuffmanNode* tree, Code* codes, uint8_t* curcode, uns
         codes[wordtoi(tree->word)].code = (uint8_t*)malloc(codesize_bytes);
         if (!codes[wordtoi(tree->word)].code) {
             fprintf(stderr, "Out of memory\n");
-            return -1;
+            return 1;
         }
         //printf("Setting code single %d\n", wordtoi(tree->word, tree->wordsize)); // DEBUG
         codes[wordtoi(tree->word)].code[0] = 0;
@@ -74,28 +77,27 @@ char Codes_build_reqursion(HuffmanNode* tree, Code* codes, uint8_t* curcode, uns
 
         if (!codes[word_index].code) {
             fprintf(stderr, "Out of memory\n");
-            return -1;
+            return 1;
         }
         for (int i = 0; i < codesize_bytes; i++) {
             codes[word_index].code[i] = curcode[i];
         }
     } else {
         if (Codes_build_reqursion(tree->left, codes, curcode, codesize + 1) == -1) {
-            return -1;
+            return 1;
         }
         unsigned int lastbyte = codesize / 8;
         unsigned char lastbit = codesize % 8;
         curcode[lastbyte] += 1 << (7 - lastbit);
         if (Codes_build_reqursion(tree->right, codes, curcode, codesize + 1) == -1) {
-            return -1;
+            return 1;
         }
         curcode[lastbyte] -= 1 << (7 - lastbit);
     }
     return 0;
 }
 
-// Runs build_codes_reqursion
-// !!! Don't forget to free the returned string !!!
+
 Codes Codes_build(HuffmanNode* tree) {
     Codes codes;
     codes.size = (1 << (wordsize*8)) + 1;
