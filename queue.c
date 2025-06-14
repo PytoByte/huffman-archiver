@@ -20,6 +20,7 @@ int queue_enqueue(Queue *queue, void *value) {
         queue->last = new;
     } else {
         queue->last->next = new;
+        queue->last = new;
     }
 
     return 0;

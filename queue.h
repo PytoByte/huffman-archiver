@@ -1,3 +1,5 @@
+#pragma once
+
 typedef struct QueueElem {
     struct QueueElem *next;
     void *value;
