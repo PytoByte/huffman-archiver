@@ -11,8 +11,8 @@ typedef struct TreeBuilder {
     unsigned int size;
     unsigned int capacity;
     HuffmanNode** nodes;
-    void (*insert)(struct TreeBuilder* self, HuffmanNode* node);
-    HuffmanNode* (*extract_tree)(struct TreeBuilder* self);
+    void (*insert)(struct TreeBuilder* self, HuffmanNode* node); 
+    HuffmanNode* (*extract_tree)(struct TreeBuilder* self);      // Extract all nodes in binary tree format
 } TreeBuilder;
 
 // Create a TreeBuilder with the given capacity

@@ -4,7 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-// === Поддержание свойств кучи ===
+// === Keeping heap properties ===
 static void swap(HuffmanNode** a, HuffmanNode** b) {
     HuffmanNode* temp = *a;
     *a = *b;
@@ -53,7 +53,7 @@ static void heapify_down(TreeBuilder* heap, unsigned char i) {
         } else return;
     }
 }
-// === Поддержание свойств кучи ===
+// === Keeping heap properties ===
 
 static void insert(TreeBuilder* self, HuffmanNode* node) {
     self->nodes[self->size] = node;
@@ -70,7 +70,7 @@ static HuffmanNode* extract(TreeBuilder* self) {
     return res;
 }
 
-// Извлечение всех узлов в формате бинарного дерева
+// Extract all nodes in binary tree format
 static HuffmanNode* extract_tree(TreeBuilder* self) {
     HuffmanNode* tree;
 
@@ -78,7 +78,7 @@ static HuffmanNode* extract_tree(TreeBuilder* self) {
         HuffmanNode* node1 = extract(self);
         HuffmanNode* node2 = extract(self);
 
-        // Создание детерминированности. Среди двух минимальных по частоте узлов, правее = больше частота
+        // Creating determinism. Among the two nodes with the lowest frequency, the one on the right = higher frequency
         HuffmanNode* merge_node = NULL;
         if (node1->freq >= node2->freq) {
             merge_node = HuffmanNode_create(0, NULL, node1->freq+node2->freq, node2, node1);
@@ -108,7 +108,7 @@ TreeBuilder* TreeBuilder_create(int capacity) {
 
 
 void TreeBuilder_free(TreeBuilder* tb) {
-    for (int i = 0; i < tb->size; i++) {
+    for (unsigned int i = 0; i < tb->size; i++) {
         HuffmanNode_freetree(tb->nodes[i]);
     }
     free(tb->nodes);

@@ -10,9 +10,8 @@ int wordtoi(const uint8_t* word) {
 }
 
 void Codes_free(Codes codes) {
-    for (int i = 0; i < codes.size; i++) {
+    for (size_t i = 0; i < codes.size; i++) {
         if (codes.codes[i].size != 0) {
-            //printf("Freeing code %d\n", i); // DEBUG
             free(codes.codes[i].code);
             codes.codes[i].size = 0;
         }
@@ -45,7 +44,6 @@ static char Codes_build_reqursion(HuffmanNode* tree, Code* codes, uint8_t* curco
             fprintf(stderr, "Out of memory\n");
             return 1;
         }
-        //printf("Setting code last %d\n", 1 << (wordsize*8)); // DEBUG
         codes[(1 << (wordsize*8))].code[0] = 0;
         return 0;
     } else if (tree->left == NULL && tree->right == NULL && codesize == 0) {
@@ -57,7 +55,6 @@ static char Codes_build_reqursion(HuffmanNode* tree, Code* codes, uint8_t* curco
             fprintf(stderr, "Out of memory\n");
             return 1;
         }
-        //printf("Setting code single %d\n", wordtoi(tree->word, tree->wordsize)); // DEBUG
         codes[wordtoi(tree->word)].code[0] = 0;
         return 0;
     } else if (tree->left == NULL && tree->right == NULL) {
@@ -79,7 +76,7 @@ static char Codes_build_reqursion(HuffmanNode* tree, Code* codes, uint8_t* curco
             fprintf(stderr, "Out of memory\n");
             return 1;
         }
-        for (int i = 0; i < codesize_bytes; i++) {
+        for (unsigned int i = 0; i < codesize_bytes; i++) {
             codes[word_index].code[i] = curcode[i];
         }
     } else {

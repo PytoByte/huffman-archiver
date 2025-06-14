@@ -41,11 +41,6 @@ void pg_update(long long delta) {
     pg_print();
 }
 
-void pg_set(long long new_value) {
-    value = new_value;
-    pg_print();
-}
-
 void pg_init(long long lim, long long start_value) {
     limit = lim;
     value = start_value;

@@ -272,14 +272,12 @@ static PreparedFilesResult prepare_headers(FileBufferIO* archive, Queue* queue, 
             free(filepath);
             if (size_pos == -1) {
                 free(path);
-                free(filepath);
                 fprintf(stderr, "Getting file position error\n");
                 return (PreparedFilesResult){-1, 0};
             }
             CompressingFile* compr_file = CompressingFile_create(path, size_pos);
             if (!compr_file) {
                 free(path);
-                free(filepath);
                 fprintf(stderr, "Out of memory\n");
                 return (PreparedFilesResult){-1, 0};
             }
@@ -295,9 +293,9 @@ static PreparedFilesResult prepare_headers(FileBufferIO* archive, Queue* queue, 
     }
 
     if (!S_ISDIR(file_stat.st_mode)) {
-        free(path);
         pg_end();
         fprintf(stderr, "Unsupported file \"%s\"\n", path);
+        free(path);
         return (PreparedFilesResult){0, 0};
     }
 
@@ -342,8 +340,8 @@ static void archive_write_filesize(FileBufferIO* archive, long size_pos, uint64_
     fseek(archive->fp, original_pos, SEEK_SET);
 }
 
-// Бронирует место для заголовков в начале архива
-// Возвращает список файлов и указателей для сжания и заполнения заголовков
+// Reserves space for headers at the beginning of the archive
+// Returns a list of files and pointers for compression and header filling
 static CompressingFilesResult prepare_archive(FileBufferIO* archive, int paths_c, char** paths) {
     CompressingFilesResult compr_files;
     
@@ -365,7 +363,7 @@ static CompressingFilesResult prepare_archive(FileBufferIO* archive, int paths_c
     }
     writebuffer(archive);
 
-    // Обновление количества файлов
+    // Updating the number of files
     long original_pos = ftell(archive->fp);
     if (original_pos == -1) {
         fprintf(stderr, "Getting file position error\n");
@@ -511,7 +509,7 @@ static int next_header_frame(HeaderFrame* header_frame) {
 // == HeaderFrame ================================
 
 
-// == Сжатие файлов ==============================
+// == Files compression ==========================
 static FileSizeResult compress_file(FileBufferIO* archive, const char* path, long size_pos) {
     FileSizeResult filesize;
     filesize.compressed = 0;
@@ -531,7 +529,7 @@ static FileSizeResult compress_file(FileBufferIO* archive, const char* path, lon
         return filesize;
     }
 
-    // Подсчёт частоты символов
+    // Calculating words frequency
     int freqs_size = (1 << (wordsize*8));
     unsigned long long* freqs = (unsigned long long*)calloc(freqs_size, sizeof(unsigned long long)); // Частоты символов (для кодирования по дереву
     if (!freqs) {
@@ -567,7 +565,9 @@ static FileSizeResult compress_file(FileBufferIO* archive, const char* path, lon
                 FileBufferIO_close(file_compress);
                 return filesize;
             }
-            strncpy(lastword, word, wordsize);
+            for (int i = 0; i < wordsize; i++) {
+                lastword[i] = word[i];
+            }
             lastword_size = readed;
         } else {
             freqs[wordtoi(word)]++;
@@ -575,9 +575,9 @@ static FileSizeResult compress_file(FileBufferIO* archive, const char* path, lon
         pg_update(readed);
     }
 
-    // Построение дерева
+    // Building a tree
     TreeBuilder* tree_builder = TreeBuilder_create(freqs_size+1);
-    for (unsigned int i = 0; i < freqs_size; i++) {
+    for (int i = 0; i < freqs_size; i++) {
         if (freqs[i]==0) {
             continue;
         }
@@ -618,7 +618,7 @@ static FileSizeResult compress_file(FileBufferIO* archive, const char* path, lon
 
     TreeBuilder_free(tree_builder);
 
-    // Кодировка по дереву
+    // Tree encoding
     Codes codes = Codes_build(tree);
     if (codes.size == 0) {
         free(word);
@@ -626,15 +626,15 @@ static FileSizeResult compress_file(FileBufferIO* archive, const char* path, lon
         return filesize;
     }
 
-    // Сжатие файла
+    // File compression
     rewind(file_compress->fp);
 
-    uint32_t compress_treesize = fwrite_tree(tree, archive); // Размер дерева в битах
-    filesize.compressed = compress_treesize; // Размер сжатого файла в битах
+    uint32_t compress_treesize = fwrite_tree(tree, archive); // Tree size in bits
+    filesize.compressed = compress_treesize; // Compressed file size in bits
 
     HuffmanNode_freetree(tree);
 
-    // Сжатие со спрессовыванием кодов
+    // Compression with code compression
     while (1) {
         size_t readed = file_compress->readbytes(file_compress, word, 0, wordsize);
 
@@ -729,9 +729,8 @@ int compress(char** paths, int paths_count, char* archivepath) {
     free(unique_archivepath);
     return 0;
 }
-// == Сжатие файлов ==============================
+// == Files compression ==========================
 
-// == Распаковка файлов ==========================
 int decompress(char* archivepath, char* outdir, char** filepaths, int filepaths_count, char** dirpaths, int dirpaths_count) {
     if (!archivepath) {
         fprintf(stderr, "Nothing to decompress\n");
@@ -808,7 +807,7 @@ int decompress(char* archivepath, char* outdir, char** filepaths, int filepaths_
 
             // check file match
             // if file found in required directory earlier, it skips
-            for (int i = 0; i < filepaths_count && filepaths_remain && !flag_match > 0; i++) {
+            for (int i = 0; i < filepaths_count && filepaths_remain > 0 && !flag_match; i++) {
                 if (strstr(header_frame.name, filepaths[i]) != header_frame.name) {
                     continue;
                 }
@@ -957,7 +956,6 @@ int decompress(char* archivepath, char* outdir, char** filepaths, int filepaths_
 
     return 0;
 }
-// == Распаковка файлов ==========================
 
 int show_files(char* archivepath, char* dirpath) {
     char* dirpath_files = NULL;
@@ -1045,12 +1043,14 @@ int show_files(char* archivepath, char* dirpath) {
         if (filesize >= 1024) {
             sizename = 'K';
             filesize /= 1024;
-        } else if (filesize >= 1048576) {
+        }
+        if (filesize >= 1024) {
             sizename = 'M';
-            filesize /= 1048576;
-        } else if (filesize >= 1073741824) {
+            filesize /= 1024;
+        }
+        if (filesize >= 1024) {
             sizename = 'G';
-            filesize /= 1073741824;
+            filesize /= 1024;
         }
 
         if (sizename == ' ') {
