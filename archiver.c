@@ -10,7 +10,7 @@
 
 #include "buffio.h"
 #include "progbar.h"
-#include "linkedlist.h"
+#include "queue.h"
 #include "buffio.h"
 #include "filetools.h"
 #include "huff/tree/builder.h"
@@ -35,15 +35,43 @@ typedef struct {
 } FileSize;
 
 typedef struct {
-    hlist* files;
+    Queue* files;
     unsigned long long total_size;
     int count;
 } CompressingFiles;
 
 typedef struct {
+    char* path;
+    long long size_pos;
+} CompressingFile;
+
+typedef struct {
     int added;
     unsigned long long filesize;
 } PreparedFiles;
+
+CompressingFile* CompressingFile_create(char* path, long long size_pos) {
+    CompressingFile* file = (CompressingFile*)malloc(sizeof(CompressingFile));
+    if (!file) {
+        return NULL;
+    }
+
+    file->path = (char*)malloc(strlen(path)+1);
+    if (!file->path) {
+        free(file);
+        return NULL;
+    }
+    strcpy(file->path, path);
+    file->size_pos = size_pos;
+
+    return file;
+}
+
+void CompressingFile_free(void* ptr) {
+    CompressingFile* file = (CompressingFile*)ptr;
+    free(file->path);
+    free(file);
+}
 
 // == Чтение и запись дерева (префиксная форма) ==
 // Запись дерева в префиксной форме
@@ -170,7 +198,7 @@ static long prepare_fileheader(FileBufferIO* archive, char* filepath, char* path
 
 // startpath - file or dir, which need to compress
 // addpath - if startpath if folder, when addpath stores subdirs of start folder
-static PreparedFiles prepare_fileheaders(FileBufferIO* archive, hlist* list, char* startpath, char* addpath) {
+static PreparedFiles prepare_fileheaders(FileBufferIO* archive, Queue* queue, char* startpath, char* addpath) {
     char* path = (char*)malloc(strlen(startpath) + strlen(addpath) + 1);
     if (!path) {
         fprintf(stderr, "Out of memory\n");
@@ -213,7 +241,13 @@ static PreparedFiles prepare_fileheaders(FileBufferIO* archive, hlist* list, cha
                 fprintf(stderr, "Getting file position error\n");
                 return (PreparedFiles){-1, 0};
             }
-            addtolist(list, path, size_pos);
+            CompressingFile* file = CompressingFile_create(path, size_pos);
+            if (!file) {
+                free(path);
+                fprintf(stderr, "Out of memory\n");
+                return (PreparedFiles){-1, 0};
+            }
+            queue_enqueue(queue, file);
         } else {
             char* rootdir = get_filename(startpath);
             char* filepath = (char*)malloc(strlen(rootdir) + strlen(addpath) + 1);
@@ -228,10 +262,18 @@ static PreparedFiles prepare_fileheaders(FileBufferIO* archive, hlist* list, cha
             free(filepath);
             if (size_pos == -1) {
                 free(path);
+                free(filepath);
                 fprintf(stderr, "Getting file position error\n");
                 return (PreparedFiles){-1, 0};
             }
-            addtolist(list, path, size_pos);
+            CompressingFile* file = CompressingFile_create(path, size_pos);
+            if (!file) {
+                free(path);
+                free(filepath);
+                fprintf(stderr, "Out of memory\n");
+                return (PreparedFiles){-1, 0};
+            }
+            queue_enqueue(queue, file);
         }
         free(path);
         return (PreparedFiles){1, filesize};
@@ -263,7 +305,7 @@ static PreparedFiles prepare_fileheaders(FileBufferIO* archive, hlist* list, cha
         char* new_addpath = (char*)malloc(strlen(addpath) + strlen(entry->d_name) + 2);
         sprintf(new_addpath, "%s/%s", addpath, entry->d_name);
 
-        PreparedFiles temp = prepare_fileheaders(archive, list, startpath, new_addpath);
+        PreparedFiles temp = prepare_fileheaders(archive, queue, startpath, new_addpath);
         files.added += temp.added;
         files.filesize += temp.filesize;
 
@@ -290,7 +332,7 @@ static void archive_write_filesize(FileBufferIO* archive, long size_pos, uint64_
 static CompressingFiles prepare_headers(FileBufferIO* archive, int paths_c, char** paths) {
     CompressingFiles compr_files;
     
-    compr_files.files = initlist();
+    compr_files.files = queue_create();
     compr_files.count = 0;
     compr_files.total_size = 0;
     archive->writebytes(archive, &compr_files.count, 0, sizeof(compr_files.count));
@@ -299,8 +341,7 @@ static CompressingFiles prepare_headers(FileBufferIO* archive, int paths_c, char
     for (int i = 0; i < paths_c; i++) {
         PreparedFiles temp = prepare_fileheaders(archive, compr_files.files, paths[i], "");
         if (temp.added == -1) {
-            freelist(compr_files.files);
-            compr_files.files = NULL;
+            queue_destroy(&compr_files.files, CompressingFile_free);
             compr_files.count = 0;
             return compr_files;
         }
@@ -313,16 +354,14 @@ static CompressingFiles prepare_headers(FileBufferIO* archive, int paths_c, char
     long original_pos = ftell(archive->fp);
     if (original_pos == -1) {
         fprintf(stderr, "Getting file position error\n");
-        freelist(compr_files.files);
-        compr_files.files = NULL;
+        queue_destroy(&compr_files.files, CompressingFile_free);
         compr_files.count = 0;
         return compr_files;
     }
     
     if (fseek(archive->fp, 0, SEEK_SET) != 0) {
         fprintf(stderr, "Fseek error\n");
-        freelist(compr_files.files);
-        compr_files.files = NULL;
+        queue_destroy(&compr_files.files, CompressingFile_free);
         compr_files.count = 0;
         return compr_files;
     }
@@ -331,8 +370,7 @@ static CompressingFiles prepare_headers(FileBufferIO* archive, int paths_c, char
 
     if (fseek(archive->fp, original_pos, SEEK_SET) != 0) {
         fprintf(stderr, "Fseek error\n");
-        freelist(compr_files.files);
-        compr_files.files = NULL;
+        queue_destroy(&compr_files.files, CompressingFile_free);
         compr_files.count = 0;
         return compr_files;
     }
@@ -639,7 +677,7 @@ int compress(char** paths, int paths_count, char* archivepath) {
     } else if (compr_files.count == 0) {
         fprintf(stderr, "Nothing to compress\n");
         free(unique_archivepath);
-        freelist(compr_files.files);
+        queue_destroy(&compr_files.files, CompressingFile_free);
         FileBufferIO_close(archive);
         return 1;
     }
@@ -647,24 +685,30 @@ int compress(char** paths, int paths_count, char* archivepath) {
     FileSize filesize_total = {.original = 0, .compressed = 0};
 
     pg_init(compr_files.count + compr_files.total_size*16, 0);
-    llist* cur = compr_files.files->begin;
-    while (cur != NULL) {
-        if (strcmp(get_filename(cur->path), unique_archivepath) == 0) {
-            cur = cur->next;
+
+    CompressingFile* compr_file = (CompressingFile*)queue_dequeue(compr_files.files);
+    while (compr_file != NULL) {
+        // Сhecking if file is archive
+        if (strcmp(get_filename(compr_file->path), unique_archivepath) == 0) {
+            CompressingFile_free(compr_file);
             continue;
         }
-        FileSize filesize = compress_file(archive, cur->path, cur->size_pos);
+        FileSize filesize = compress_file(archive, compr_file->path, compr_file->size_pos);
         if (filesize.compressed == 0 && filesize.original != 0) {
             pg_end();
+            fprintf(stderr, "Error while compressing %s\n", compr_file->path);
             free(unique_archivepath);
-            fprintf(stderr, "Error while compressing %s\n", cur->path);
+            CompressingFile_free(compr_file);
+            queue_destroy(&compr_files.files, CompressingFile_free);
             return 1;
         }
         filesize_total.original += filesize.original;
         pg_update(1);
-        cur = cur->next;
+
+        CompressingFile_free(compr_file);
+        compr_file = (CompressingFile*)queue_dequeue(compr_files.files);
     }
-    freelist(compr_files.files);
+    queue_destroy(&compr_files.files, CompressingFile_free);
     pg_end();
 
     FileBufferIO_close(archive);
