@@ -784,7 +784,7 @@ int decompress(char* archivepath, char* outdir, char** filepaths, int filepaths_
         if (filepaths_count+dirpaths_count > 0) {
             int flag_match = 0;
 
-            if (lastdir_ind > 0 && strstr(header_frame.name, dirpaths[lastdir_ind]) == header_frame.name) {
+            if (lastdir_ind >= 0 && strstr(header_frame.name, dirpaths[lastdir_ind]) == header_frame.name) {
                 flag_match = 1;
                 
                 cutted_filepath += get_filename(dirpaths[lastdir_ind])-dirpaths[lastdir_ind];
