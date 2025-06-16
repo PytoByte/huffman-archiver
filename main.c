@@ -17,7 +17,8 @@ enum OptionType {
     OPTION_OUTPUT = 0,
     OPTION_WORDSIZE = 1,
     OPTION_DIR = 2,
-    OPTION_SKIPWARNING = 3,
+    OPTION_DECLINEWARNING = 3,
+    OPTION_ACCEPTWARNING = 4,
     INVALID_OPTION
 };
 
@@ -30,7 +31,7 @@ typedef struct {
     char** dirs;
     int dirs_count;
     int wordsize;
-    int skip_warning;
+    enum WarningAction warning_action;
 } Instruction;
 
 typedef struct Manual {
@@ -42,7 +43,7 @@ typedef struct Manual {
 
 Manual commands_manual[] = {
     {2, (const char*[]){"-help", "-h"}, "Show help information", "-help"},
-    {2, (const char*[]){"-compress", "-c"}, "Compress files", "-compress [files|dirs] -output <file> -word <number>"},
+    {2, (const char*[]){"-compress", "-c"}, "Compress files", "-compress [files|dirs] -output <file> -word <number> [-dw|aw]"},
     {2, (const char*[]){"-decompress", "-d"}, "Decompress files", "-decompress <archive> -output <dir> [files] [-dir <path>]"},
     {2, (const char*[]){"-list", "-ls"}, "Show list of files in archive. Use -dir to select dir in archive", "-list <archive> -dir <path>"},
     {0, NULL, NULL, NULL}
@@ -52,7 +53,8 @@ Manual options_manual[] = {
     {2, (const char*[]){"-output", "-o"}, "Specify path for command", "-output <file|dir>"},
     {2, (const char*[]){"-word", "-w"}, "Specify word size in bytes (from 1 to 3)", "-word <number>"},
     {1, (const char*[]){"-dir"}, "Specify directory inside archive", "-dir <path>"},
-    {2, (const char*[]){"-skipwarning", "-sw"}, "Skip warning about small files", "-skipwarning"},
+    {2, (const char*[]){"-declinewarning", "-dw"}, "Decline all warnings about small files", "-declinewarning"},
+    {2, (const char*[]){"-acceptwarning", "-aw"}, "Accept all warnings about small files", "-acceptwarning"},
     {0, NULL, NULL, NULL}
 };
 
@@ -120,168 +122,198 @@ void free_instruction(Instruction ins) {
 }
 
 Instruction parse_instruction(int argc, char** argv) {
-    Instruction instruction = {INVALID_COMMAND, NULL, NULL, NULL, 0, NULL, 0, 1, 0};
+    Instruction ins = {INVALID_COMMAND, NULL, NULL, NULL, 0, NULL, 0, 1, WARN_ACT_ASK};
 
-    instruction.files = (char**)malloc(argc * sizeof(char*));
-    if (!instruction.files) {
-        instruction.cmd = PARSER_ERROR;
+    ins.files = (char**)malloc(argc * sizeof(char*));
+    if (!ins.files) {
+        ins.cmd = PARSER_ERROR;
         fprintf(stderr, "Memory allocation failed\n");
-        return instruction;
+        return ins;
     }
 
-    instruction.dirs = (char**)malloc((argc/2) * sizeof(char*));
-    if (!instruction.files) {
-        instruction.cmd = PARSER_ERROR;
+    ins.dirs = (char**)malloc((argc/2) * sizeof(char*));
+    if (!ins.files) {
+        ins.cmd = PARSER_ERROR;
         fprintf(stderr, "Memory allocation failed\n");
-        free(instruction.files);
-        return instruction;
+        free(ins.files);
+        return ins;
     }
 
     int check = 0;
     for (int i = 0; i < argc; i++) {
         check = check_flag(argv[i], commands_manual[HELP].aliases, commands_manual[HELP].aliases_count);
         if (check == 1) {
-            instruction.cmd = HELP;
-            return instruction;
+            ins.cmd = HELP;
+            return ins;
         } else if (check == -1) {
-            instruction.cmd = PARSER_ERROR;
-            free_instruction(instruction);
-            return instruction;
+            ins.cmd = PARSER_ERROR;
+            free_instruction(ins);
+            return ins;
         }
 
         check = check_flag(argv[i], commands_manual[COMPRESS].aliases, commands_manual[COMPRESS].aliases_count);
         if (check == 1) {
-            if (instruction.cmd != INVALID_COMMAND) {
+            if (ins.cmd != INVALID_COMMAND) {
                 fprintf(stderr, "Only one command can be specified\n");
-                instruction.cmd = PARSER_ERROR;
-                free_instruction(instruction);
-                return instruction;
+                ins.cmd = PARSER_ERROR;
+                free_instruction(ins);
+                return ins;
             }
-            instruction.cmd = COMPRESS;
+            ins.cmd = COMPRESS;
             continue;
         } else if (check == -1) {
-            instruction.cmd = PARSER_ERROR;
-            free_instruction(instruction);
-            return instruction;
+            ins.cmd = PARSER_ERROR;
+            free_instruction(ins);
+            return ins;
         }
 
         check = check_flag(argv[i], commands_manual[DECOMPRESS].aliases, commands_manual[DECOMPRESS].aliases_count);
         if (check == 1) {
-            if (instruction.cmd != INVALID_COMMAND) {
+            if (ins.cmd != INVALID_COMMAND) {
                 fprintf(stderr, "Only one command can be specified\n");
-                instruction.cmd = PARSER_ERROR;
-                free_instruction(instruction);
-                return instruction;
+                ins.cmd = PARSER_ERROR;
+                free_instruction(ins);
+                return ins;
             }
 
             if (argc <= i+1) {
                 fprintf(stderr, "Option \"%s\" requires 1 argument\n", argv[i]);
-                instruction.cmd = PARSER_ERROR;
-                free_instruction(instruction);
-                return instruction;
+                ins.cmd = PARSER_ERROR;
+                free_instruction(ins);
+                return ins;
             }
 
-            instruction.archive = argv[i+1];
+            ins.archive = argv[i+1];
             i += 1;
 
-            instruction.cmd = DECOMPRESS;
+            ins.cmd = DECOMPRESS;
             continue;
         } else if (check == -1) {
-            instruction.cmd = PARSER_ERROR;
-            free_instruction(instruction);
-            return instruction;
+            ins.cmd = PARSER_ERROR;
+            free_instruction(ins);
+            return ins;
         }
 
         check = check_flag(argv[i], commands_manual[LIST].aliases, commands_manual[LIST].aliases_count);
         if (check == 1) {
-            if (instruction.cmd != INVALID_COMMAND) {
+            if (ins.cmd != INVALID_COMMAND) {
                 fprintf(stderr, "Only one command can be specified\n");
-                instruction.cmd = PARSER_ERROR;
-                free_instruction(instruction);
-                return instruction;
+                ins.cmd = PARSER_ERROR;
+                free_instruction(ins);
+                return ins;
             }
-            instruction.cmd = LIST;
+            if (argc <= i+1) {
+                fprintf(stderr, "Option \"%s\" requires 1 argument\n", argv[i]);
+                ins.cmd = PARSER_ERROR;
+                free_instruction(ins);
+                return ins;
+            }
+            ins.cmd = LIST;
+            ins.archive = argv[i+1];
+            i += 1;
             continue;
         } else if (check == -1) {
-            instruction.cmd = PARSER_ERROR;
-            free_instruction(instruction);
-            return instruction;
+            ins.cmd = PARSER_ERROR;
+            free_instruction(ins);
+            return ins;
         }
 
         check = check_flag(argv[i], options_manual[OPTION_OUTPUT].aliases, options_manual[OPTION_OUTPUT].aliases_count);
         if (check == 1) {
             if (argc <= i+1) {
                 fprintf(stderr, "Option \"%s\" requires 1 argument\n", argv[i]);
-                instruction.cmd = PARSER_ERROR;
-                free_instruction(instruction);
-                return instruction;
+                ins.cmd = PARSER_ERROR;
+                free_instruction(ins);
+                return ins;
             }
-            instruction.out = argv[i+1];
+            ins.out = argv[i+1];
             i += 1;
             continue;
         } else if (check == -1) {
-            instruction.cmd = PARSER_ERROR;
-            free_instruction(instruction);
-            return instruction;
+            ins.cmd = PARSER_ERROR;
+            free_instruction(ins);
+            return ins;
         }
 
         check = check_flag(argv[i], options_manual[OPTION_WORDSIZE].aliases, options_manual[OPTION_WORDSIZE].aliases_count);
         if (check == 1) {
             if (argc <= i+1) {
                 fprintf(stderr, "Option \"%s\" requires 1 argument\n", argv[i]);
-                instruction.cmd = PARSER_ERROR;
-                free_instruction(instruction);
-                return instruction;
+                ins.cmd = PARSER_ERROR;
+                free_instruction(ins);
+                return ins;
             }
 
             int parse_wordsize = atoi(argv[i+1]);
             if (parse_wordsize < 1 || parse_wordsize>3) {
-                fprintf(stderr, "Option \"%s\" can take only one of the following values: from 1 to 3\n", argv[i]);
-                instruction.cmd = PARSER_ERROR;
-                free_instruction(instruction);
-                return instruction;
+                fprintf(stderr, "Option \"%s\" can take only one of the following values: from 1 to 2\n", argv[i]);
+                ins.cmd = PARSER_ERROR;
+                free_instruction(ins);
+                return ins;
             }
 
-            instruction.wordsize = parse_wordsize;
+            ins.wordsize = parse_wordsize;
             i += 1;
             continue;
         } else if (check == -1) {
-            instruction.cmd = PARSER_ERROR;
-            free_instruction(instruction);
-            return instruction;
+            ins.cmd = PARSER_ERROR;
+            free_instruction(ins);
+            return ins;
         }
 
         check = check_flag(argv[i], options_manual[OPTION_DIR].aliases, options_manual[OPTION_DIR].aliases_count);
         if (check == 1) {
             if (argc <= i+1) {
                 fprintf(stderr, "Option \"%s\" requires 1 argument\n", argv[i]);
-                instruction.cmd = PARSER_ERROR;
-                free_instruction(instruction);
-                return instruction;
+                ins.cmd = PARSER_ERROR;
+                free_instruction(ins);
+                return ins;
             }
-            instruction.dirs[instruction.dirs_count++] = argv[i+1];
+            ins.dirs[ins.dirs_count++] = argv[i+1];
             i += 1;
             continue;
         } else if (check == -1) {
-            instruction.cmd = PARSER_ERROR;
-            free_instruction(instruction);
-            return instruction;
+            ins.cmd = PARSER_ERROR;
+            free_instruction(ins);
+            return ins;
         }
 
-        check = check_flag(argv[i], options_manual[OPTION_SKIPWARNING].aliases, options_manual[OPTION_SKIPWARNING].aliases_count);
+        check = check_flag(argv[i], options_manual[OPTION_DECLINEWARNING].aliases, options_manual[OPTION_DECLINEWARNING].aliases_count);
         if (check == 1) {
-            instruction.skip_warning = 1;
+            if (ins.warning_action != WARN_ACT_ASK) {
+                fprintf(stderr, "Only one warning option can be specified\n");
+                ins.cmd = PARSER_ERROR;
+                free_instruction(ins);
+                return ins;
+            }
+            ins.warning_action = WARN_ACT_DECLINE;
             continue;
         } else if (check == -1) {
-            instruction.cmd = PARSER_ERROR;
-            free_instruction(instruction);
-            return instruction;
+            ins.cmd = PARSER_ERROR;
+            free_instruction(ins);
+            return ins;
         }
 
-        instruction.files[instruction.files_count++] = argv[i];
+        check = check_flag(argv[i], options_manual[OPTION_ACCEPTWARNING].aliases, options_manual[OPTION_ACCEPTWARNING].aliases_count);
+        if (check == 1) {
+            if (ins.warning_action != WARN_ACT_ASK) {
+                fprintf(stderr, "Only one warning option can be specified\n");
+                ins.cmd = PARSER_ERROR;
+                free_instruction(ins);
+                return ins;
+            }
+            ins.warning_action = WARN_ACT_ACCEPT;
+            continue;
+        } else if (check == -1) {
+            ins.cmd = PARSER_ERROR;
+            free_instruction(ins);
+            return ins;
+        }
+
+        ins.files[ins.files_count++] = argv[i];
     }
 
-    return instruction;
+    return ins;
 }
 
 int main(int argc, char* argv[]) {
@@ -300,7 +332,7 @@ int main(int argc, char* argv[]) {
         command_help(argv[0]);
     } else if (ins.cmd == COMPRESS) {
         wordsize = ins.wordsize;
-        add_small_files = ins.skip_warning;
+        compress_warn_act = ins.warning_action;
 
         int flag;
         if (!ins.out) {
@@ -330,7 +362,7 @@ int main(int argc, char* argv[]) {
             return 1;
         }
     } else if (ins.cmd == LIST) {
-        if (ins.files_count == 0) {
+        if (ins.archive == NULL) {
             fprintf(stderr, "Archive not specified\n");
             free_instruction(ins);
             return 1;
@@ -338,9 +370,9 @@ int main(int argc, char* argv[]) {
 
         int flag;
         if (ins.dirs_count == 0) {
-            flag = show_files(ins.files[0], NULL);
+            flag = show_files(ins.archive, NULL);
         } else {
-            flag = show_files(ins.files[0], ins.dirs[0]);
+            flag = show_files(ins.archive, ins.dirs[0]);
         }
 
         if (flag) {

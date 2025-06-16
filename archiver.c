@@ -17,7 +17,7 @@
 #include "huff/tree/codes.h"
 
 uint8_t wordsize = 1;
-int add_small_files = 0;
+enum WarningAction compress_warn_act = WARN_ACT_ASK;
 
 typedef struct {
     int count;
@@ -197,6 +197,7 @@ static long prepare_fileheader(FileBufferIO* archive, char* filepath, char* path
     return size_pos;
 }
 
+
 // startpath - file or dir, which need to compress
 // addpath - if startpath if folder, when addpath stores subdirs of start folder
 static PreparedFilesResult prepare_headers(FileBufferIO* archive, Queue* queue, char* startpath, char* addpath) {
@@ -224,10 +225,17 @@ static PreparedFilesResult prepare_headers(FileBufferIO* archive, Queue* queue, 
 
     if (S_ISREG(file_stat.st_mode)) {
         size_t filesize = get_filesize(path);
-        if (!add_small_files) {
+
+        // Here is warning if file is too small
+        if (compress_warn_act != WARN_ACT_DECLINE) {
             if (filesize < 512) {
+                if (compress_warn_act == WARN_ACT_ACCEPT) {
+                    free(path);
+                    return (PreparedFilesResult){0, 0};
+                }
+
                 printf("WARNING \"%s\" (%ld bytes)\n", get_filename(path), filesize);
-                printf("File too small, it may be bigger after compressing\n");
+                printf("File too small (<512 bytes), it may be bigger after compressing\n");
                 printf("Skip this file? (y/default n) ");
                 if (getchar() == 'y') {
                     free(path);
@@ -331,12 +339,14 @@ static PreparedFilesResult prepare_headers(FileBufferIO* archive, Queue* queue, 
     return files;
 }
 
-static void archive_write_filesize(FileBufferIO* archive, long size_pos, uint64_t filesize, uint32_t treesize, uint64_t filestart) {
+static void fwrite_compressed_filesize(FileBufferIO* archive, long size_pos, uint64_t filesize, uint32_t treesize, uint64_t filestart) {
+    writebuffer(archive);
     long original_pos = ftell(archive->fp);
     fseek(archive->fp, size_pos, SEEK_SET);
-    fwrite(&filesize, sizeof(filesize), 1, archive->fp);
-    fwrite(&treesize, sizeof(treesize), 1, archive->fp);
-    fwrite(&filestart, sizeof(filestart), 1, archive->fp);
+    archive->writebytes(archive, &filesize, 0, sizeof(filesize));
+    archive->writebytes(archive, &treesize, 0, sizeof(treesize));
+    archive->writebytes(archive, &filestart, 0, sizeof(filestart));
+    writebuffer(archive);
     fseek(archive->fp, original_pos, SEEK_SET);
 }
 
@@ -379,7 +389,9 @@ static CompressingFilesResult prepare_archive(FileBufferIO* archive, int paths_c
         return compr_files;
     }
 
-    fwrite(&compr_files.count, sizeof(compr_files.count), 1, archive->fp);
+    writebuffer(archive);
+    archive->writebytes(archive, &compr_files.count, 0, sizeof(compr_files.count));
+    writebuffer(archive);
 
     if (fseek(archive->fp, original_pos, SEEK_SET) != 0) {
         fprintf(stderr, "Fseek error\n");
@@ -659,7 +671,7 @@ static FileSizeResult compress_file(FileBufferIO* archive, const char* path, lon
     
     FileBufferIO_close(file_compress);
 
-    archive_write_filesize(archive, size_pos, filesize.compressed, compress_treesize, filestart);
+    fwrite_compressed_filesize(archive, size_pos, filesize.compressed, compress_treesize, filestart);
 
     return filesize;
 }
@@ -680,6 +692,7 @@ int compress(char** paths, int paths_count, char* archivepath) {
     }
     
     // Prepare archive headers
+    printf("Preparing headers...\n");
     CompressingFilesResult compr_files = prepare_archive(archive, paths_count, paths); 
     if (compr_files.files == NULL) {
         free(unique_archivepath);
@@ -695,6 +708,7 @@ int compress(char** paths, int paths_count, char* archivepath) {
 
     FileSizeResult filesize_total = {.original = 0, .compressed = 0};
 
+    printf("Compressing %d files...\n", compr_files.count);
     pg_init(compr_files.count + compr_files.total_size*16, 0);
 
     CompressingFile* compr_file = (CompressingFile*)queue_dequeue(compr_files.files);

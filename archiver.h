@@ -6,8 +6,14 @@
 // Size of words in bytes to compress/decompress
 extern uint8_t wordsize;
 
+enum WarningAction {
+    WARN_ACT_ASK,
+    WARN_ACT_ACCEPT,
+    WARN_ACT_DECLINE
+};
+
 // Skip warning about small files
-extern int add_small_files;
+extern enum WarningAction compress_warn_act;
 
 // Compress files from paths and store them into archive on archivepath
 // returns 0 if success, else 1
