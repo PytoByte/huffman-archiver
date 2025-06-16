@@ -738,7 +738,8 @@ int compress(char** paths, int paths_count, char* archivepath) {
 
     FileBufferIO_close(archive);
 
-    printf("Result: %ld -> %ld bytes\n", filesize_total.original, get_filesize(unique_archivepath));
+    size_t archive_size = get_filesize(unique_archivepath);
+    printf("Result: %ld -> %ld bytes (k=%.3lf)\n", filesize_total.original, archive_size, (double)archive_size/filesize_total.original);
     printf("Saved in %s\n", unique_archivepath);
     free(unique_archivepath);
     return 0;
@@ -764,14 +765,21 @@ int decompress(char* archivepath, char* outdir, char** filepaths, int filepaths_
 
     uint32_t files_count = 0;
     if (!archive_frame->readbytes(archive_frame, &files_count, 0, sizeof(files_count))) {
-        fprintf(stderr, "EOF while reading headers\n");
+        fprintf(stderr, "Corrupted file: EOF while reading headers\n");
         FileBufferIO_close(archive);
         FileBufferIO_close(archive_frame);
         return 1;
     }
 
     if (!archive_frame->readbytes(archive_frame, &wordsize, 0, sizeof(wordsize))) {
-        fprintf(stderr, "EOF while reading headers\n");
+        fprintf(stderr, "Corrupted file: EOF while reading headers\n");
+        FileBufferIO_close(archive);
+        FileBufferIO_close(archive_frame);
+        return 1;
+    }
+
+    if (wordsize == 0 || wordsize > 2) {
+        fprintf(stderr, "Corrupted file: invalid wordsize\n");
         FileBufferIO_close(archive);
         FileBufferIO_close(archive_frame);
         return 1;
@@ -787,6 +795,7 @@ int decompress(char* archivepath, char* outdir, char** filepaths, int filepaths_
     printf("Decompressing files from %s\n", archivepath);
     pg_init(get_filesize(archivepath)*8, 0);
 
+    int decompressed_count = 0;
     int filepaths_remain = filepaths_count;
     int dirpaths_remain = dirpaths_count;
     int lastdir_ind = -1;
@@ -961,12 +970,14 @@ int decompress(char* archivepath, char* outdir, char** filepaths, int filepaths_
 
         HuffmanNode_freetree(tree);
         FileBufferIO_close(file_decompress);
+        decompressed_count++;
     } while (next_header_frame(&header_frame));
 
     FileBufferIO_close(archive);
     FileBufferIO_close(archive_frame);
 
     pg_end();
+    printf("Decompressed %d files in %s\n", decompressed_count, outdir);
 
     return 0;
 }

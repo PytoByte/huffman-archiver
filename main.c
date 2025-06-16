@@ -51,7 +51,7 @@ Manual commands_manual[] = {
 
 Manual options_manual[] = {
     {2, (const char*[]){"-output", "-o"}, "Specify path for command", "-output <file|dir>"},
-    {2, (const char*[]){"-word", "-w"}, "Specify word size in bytes (from 1 to 3)", "-word <number>"},
+    {2, (const char*[]){"-word", "-w"}, "Specify word size in bytes (from 1 to 2)", "-word <number>"},
     {1, (const char*[]){"-dir"}, "Specify directory inside archive", "-dir <path>"},
     {2, (const char*[]){"-declinewarning", "-dw"}, "Decline all warnings about small files", "-declinewarning"},
     {2, (const char*[]){"-acceptwarning", "-aw"}, "Accept all warnings about small files", "-acceptwarning"},
@@ -245,7 +245,7 @@ Instruction parse_instruction(int argc, char** argv) {
             }
 
             int parse_wordsize = atoi(argv[i+1]);
-            if (parse_wordsize < 1 || parse_wordsize>3) {
+            if (parse_wordsize < 1 || parse_wordsize>2) {
                 fprintf(stderr, "Option \"%s\" can take only one of the following values: from 1 to 2\n", argv[i]);
                 ins.cmd = PARSER_ERROR;
                 free_instruction(ins);
