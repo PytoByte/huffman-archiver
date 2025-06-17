@@ -1,7 +1,6 @@
 # Compiler settings
 CC      := gcc
 CFLAGS  := -g -Wall -Wextra -Wpedantic
-LDFLAGS := 
 
 # Project name
 TARGET := huf
@@ -26,23 +25,22 @@ SOURCES := \
 OBJECTS := $(SOURCES:.c=.o)
 
 # Default target
-all: $(TARGET) clean
+all: $(TARGET)
 
 # Link object files to create executable
 $(TARGET): $(OBJECTS)
 	@echo "Linking $@..."
-	@$(CC) $(CFLAGS) $(LDFLAGS) $^ -o $@
+	@$(CC) $(CFLAGS) $^ -o $@
 	@echo "Build successful!"
 
-# Compile source files to object files
+# Compile source files
 %.o: %.c
 	@echo "Compiling $<..."
 	@$(CC) $(CFLAGS) -c $< -o $@
 
-# Clean build artifacts
 clean:
 	@echo "Cleaning..."
-	@rm -f $(OBJECTS)
+	@rm -f $(OBJECTS) $(TARGET)
 	@echo "Clean complete."
 
 # Phony targets (not files)

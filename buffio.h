@@ -23,3 +23,5 @@ size_t writebuffer(FileBufferIO* self);
 FileBufferIO* FileBufferIO_open(const char* filepath, const char* modes, size_t buffer_size);
 
 void FileBufferIO_close(FileBufferIO* fb);
+
+void FileBufferIO_close_remove(FileBufferIO* fb);

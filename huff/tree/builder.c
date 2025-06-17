@@ -11,19 +11,19 @@ static void swap(HuffmanNode** a, HuffmanNode** b) {
     *b = temp;
 }
 
-static unsigned char parent(unsigned char i) {
+static unsigned int parent(unsigned int i) {
     return (i - 1) / 2;
 }
 
-static unsigned char child_left(unsigned char i) {
+static unsigned int child_left(unsigned int i) {
     return i * 2 + 1;
 }
 
-static unsigned char child_right(unsigned char i) {
+static unsigned int child_right(unsigned int i) {
     return i * 2 + 2;
 }
 
-static void heapify_up(TreeBuilder* heap, unsigned char i) {
+static void heapify_up(TreeBuilder* heap, unsigned int i) {
     HuffmanNode** nodes = heap->nodes;
 
     while (1) {
@@ -36,13 +36,12 @@ static void heapify_up(TreeBuilder* heap, unsigned char i) {
     }
 }
 
-static void heapify_down(TreeBuilder* heap, unsigned char i) {
+static void heapify_down(TreeBuilder* heap, unsigned int i) {
     HuffmanNode** nodes = heap->nodes;
 
     while (1) {
-        if (child_left(i)<=i || child_right(i)<=i ||
-            child_left(i)>=heap->size || child_right(i)>=heap->size
-        ) return;
+        if (child_left(i)>=heap->size || child_right(i)>=heap->size)
+            return;
 
         if (nodes[child_left(i)]->freq < nodes[i]->freq) {
             swap(&nodes[child_left(i)], &nodes[i]);
@@ -95,7 +94,7 @@ static HuffmanNode* extract_tree(TreeBuilder* self) {
 }
 
 
-TreeBuilder* TreeBuilder_create(int capacity) {
+TreeBuilder* TreeBuilder_create(unsigned int capacity) {
     TreeBuilder* heap = (TreeBuilder*)malloc(sizeof(TreeBuilder));
     if (heap == NULL) return NULL;
     heap->size = 0;

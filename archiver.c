@@ -23,22 +23,22 @@ typedef struct {
     int count;
     int current;
     char* name;
-    uint64_t size_original;
-    uint64_t size_compressed;
-    uint32_t treesize;
+    uint64_t size_original; // bytes
+    uint64_t size_compressed; // bits
+    uint32_t treesize; // bits
     uint64_t filestart;
     FileBufferIO* fb;
 } HeaderFrame;
 
 // == Result structures ==
 typedef struct {
-    uint64_t original;
-    uint64_t compressed;
+    uint64_t original; // bytes
+    uint64_t compressed_bits; // bits
 } FileSizeResult;
 
 typedef struct {
     Queue* files;
-    unsigned long long total_size;
+    unsigned long long total_size; // bits
     int count;
 } CompressingFilesResult;
 
@@ -49,7 +49,7 @@ typedef struct {
 
 typedef struct {
     int added;
-    unsigned long long filesize;
+    unsigned long long filesize; // bits
 } PreparedFilesResult;
 // == Result structures ==
 
@@ -218,6 +218,7 @@ static PreparedFilesResult prepare_headers(FileBufferIO* archive, Queue* queue, 
 
     struct stat file_stat;
     if (stat(path, &file_stat) == -1) {
+        fprintf(stderr, "Error while opening file %s: ", path);
         perror("stat error");
         free(path);
         return (PreparedFilesResult){-1, 0};
@@ -237,13 +238,15 @@ static PreparedFilesResult prepare_headers(FileBufferIO* archive, Queue* queue, 
                 printf("WARNING \"%s\" (%ld bytes)\n", get_filename(path), filesize);
                 printf("File too small (<512 bytes), it may be bigger after compressing\n");
                 printf("Skip this file? (y/default n) ");
-                if (getchar() == 'y') {
+
+                char c = getchar();
+                if (c == 'y' || c == 'Y') {
+                    while ((c = getchar()) != '\n' && c != EOF);
                     free(path);
                     return (PreparedFilesResult){0, 0};
-                };
-                printf("\n");
-
-                while (getchar() != '\n');
+                } else if (c != '\n') {
+                    while ((c = getchar()) != '\n' && c != EOF);
+                }
             }
         }
 
@@ -312,6 +315,7 @@ static PreparedFilesResult prepare_headers(FileBufferIO* archive, Queue* queue, 
 
     dir = opendir(path);
     if (dir == NULL) {
+        fprintf(stderr, "Error while opening dir %s: ", path);
         perror("Open dir error");
         free(path);
         return (PreparedFilesResult){0, 0};
@@ -524,7 +528,7 @@ static int next_header_frame(HeaderFrame* header_frame) {
 // == Files compression ==========================
 static FileSizeResult compress_file(FileBufferIO* archive, const char* path, long size_pos) {
     FileSizeResult filesize;
-    filesize.compressed = 0;
+    filesize.compressed_bits = 0;
     filesize.original = get_filesize(path);
     if (filesize.original == 0) {
         return filesize;
@@ -542,7 +546,7 @@ static FileSizeResult compress_file(FileBufferIO* archive, const char* path, lon
     }
 
     // Calculating words frequency
-    int freqs_size = (1 << (wordsize*8));
+    unsigned int freqs_size = (1 << (wordsize*8));
     unsigned long long* freqs = (unsigned long long*)calloc(freqs_size, sizeof(unsigned long long)); // Частоты символов (для кодирования по дереву
     if (!freqs) {
         fprintf(stderr, "Out of memory\n");
@@ -589,7 +593,7 @@ static FileSizeResult compress_file(FileBufferIO* archive, const char* path, lon
 
     // Building a tree
     TreeBuilder* tree_builder = TreeBuilder_create(freqs_size+1);
-    for (int i = 0; i < freqs_size; i++) {
+    for (unsigned int i = 0; i < freqs_size; i++) {
         if (freqs[i]==0) {
             continue;
         }
@@ -642,7 +646,7 @@ static FileSizeResult compress_file(FileBufferIO* archive, const char* path, lon
     rewind(file_compress->fp);
 
     uint32_t compress_treesize = fwrite_tree(tree, archive); // Tree size in bits
-    filesize.compressed = compress_treesize; // Compressed file size in bits
+    filesize.compressed_bits = compress_treesize; // Compressed file size in bits
 
     HuffmanNode_freetree(tree);
 
@@ -663,7 +667,7 @@ static FileSizeResult compress_file(FileBufferIO* archive, const char* path, lon
             code = codes.codes[wordtoi(word)].code;
             size = codes.codes[wordtoi(word)].size;
         }
-        filesize.compressed += archive->writebits(archive, code, 0, size);
+        filesize.compressed_bits += archive->writebits(archive, code, 0, size);
         pg_update(readed);
     }
     free(word);
@@ -671,7 +675,7 @@ static FileSizeResult compress_file(FileBufferIO* archive, const char* path, lon
     
     FileBufferIO_close(file_compress);
 
-    fwrite_compressed_filesize(archive, size_pos, filesize.compressed, compress_treesize, filestart);
+    fwrite_compressed_filesize(archive, size_pos, filesize.compressed_bits, compress_treesize, filestart);
 
     return filesize;
 }
@@ -696,17 +700,17 @@ int compress(char** paths, int paths_count, char* archivepath) {
     CompressingFilesResult compr_files = prepare_archive(archive, paths_count, paths); 
     if (compr_files.files == NULL) {
         free(unique_archivepath);
-        FileBufferIO_close(archive);
+        FileBufferIO_close_remove(archive);
         return 1;
     } else if (compr_files.count == 0) {
         fprintf(stderr, "Nothing to compress\n");
         free(unique_archivepath);
         queue_destroy(&compr_files.files, CompressingFile_free);
-        FileBufferIO_close(archive);
+        FileBufferIO_close_remove(archive);
         return 1;
     }
 
-    FileSizeResult filesize_total = {.original = 0, .compressed = 0};
+    FileSizeResult filesize_total = {.original = 0, .compressed_bits = 0};
 
     printf("Compressing %d files...\n", compr_files.count);
     pg_init(compr_files.count + compr_files.total_size*16, 0);
@@ -719,12 +723,13 @@ int compress(char** paths, int paths_count, char* archivepath) {
             continue;
         }
         FileSizeResult filesize = compress_file(archive, compr_file->path, compr_file->size_pos);
-        if (filesize.compressed == 0 && filesize.original != 0) {
+        if (filesize.compressed_bits == 0 && filesize.original != 0) {
             pg_end();
             fprintf(stderr, "Error while compressing %s\n", compr_file->path);
             free(unique_archivepath);
             CompressingFile_free(compr_file);
             queue_destroy(&compr_files.files, CompressingFile_free);
+            FileBufferIO_close_remove(archive);
             return 1;
         }
         filesize_total.original += filesize.original;

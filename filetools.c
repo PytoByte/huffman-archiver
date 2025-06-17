@@ -20,13 +20,14 @@ int check_file_exist(const char* filepath) {
 }
 
 size_t get_filesize(const char* filepath) {
-   struct stat buffer;
-   int exist = stat(filepath, &buffer);
-   if (exist == -1) {
-       perror("stat error");
-       return 0;
-   }
-   return buffer.st_size;
+    struct stat buffer;
+    int exist = stat(filepath, &buffer);
+    if (exist == -1) {
+        fprintf(stderr, "Error while opening file %s: ", filepath);
+        perror("stat error");
+        return 0;
+    }
+    return buffer.st_size;
 }
 
 char* get_filename(char* filepath) {
@@ -125,6 +126,7 @@ int create_directories(const char *path) {
             *sp = '\0';
             if (check_file_exist(temp) == 0) {
                 if (mkdir(temp, 0700) == -1) {
+                    fprintf(stderr, "Error while making %s: ", temp);
                     perror("mkdir");
                     free(temp);
                     return 1;

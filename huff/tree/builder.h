@@ -17,7 +17,7 @@ typedef struct TreeBuilder {
 
 // Create a TreeBuilder with the given capacity
 // !!! After use, run "TreeBuilder_free" if non-null !!!
-TreeBuilder* TreeBuilder_create(int capacity);
+TreeBuilder* TreeBuilder_create(unsigned int capacity);
 
 // Free the TreeBuilder
 void TreeBuilder_free(TreeBuilder* tb);

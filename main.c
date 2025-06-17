@@ -43,9 +43,9 @@ typedef struct Manual {
 
 Manual commands_manual[] = {
     {2, (const char*[]){"-help", "-h"}, "Show help information", "-help"},
-    {2, (const char*[]){"-compress", "-c"}, "Compress files", "-compress [files|dirs] -output <file> -word <number> [-dw|aw]"},
-    {2, (const char*[]){"-decompress", "-d"}, "Decompress files", "-decompress <archive> -output <dir> [files] [-dir <path>]"},
-    {2, (const char*[]){"-list", "-ls"}, "Show list of files in archive. Use -dir to select dir in archive", "-list <archive> -dir <path>"},
+    {2, (const char*[]){"-compress", "-c"}, "Compress files", "-compress [files|dirs] [-output <file>] [-word <number>] [-dw|aw]"},
+    {2, (const char*[]){"-decompress", "-d"}, "Decompress files", "-decompress <archive> [-output <dir>] [files] [-dir <path>]"},
+    {2, (const char*[]){"-list", "-ls"}, "Show list of files in archive. Use -dir to select dir in archive", "-list <archive> [-dir <path>]"},
     {0, NULL, NULL, NULL}
 };
 
@@ -269,6 +269,16 @@ Instruction parse_instruction(int argc, char** argv) {
                 free_instruction(ins);
                 return ins;
             }
+
+            for (int j = 0; j < ins.dirs_count; j++) {
+                if (strcmp(ins.dirs[j], argv[i+1]) == 0) {
+                    fprintf(stderr, "Directory \"%s\" is specified twice\n", argv[i+1]);
+                    ins.cmd = PARSER_ERROR;
+                    free_instruction(ins);
+                    return ins;
+                }
+            }
+
             ins.dirs[ins.dirs_count++] = argv[i+1];
             i += 1;
             continue;
@@ -310,6 +320,14 @@ Instruction parse_instruction(int argc, char** argv) {
             return ins;
         }
 
+        for (int i = 0; i < ins.files_count; i++) {
+            if (strcmp(ins.files[i], argv[i]) == 0) {
+                fprintf(stderr, "File \"%s\" is specified twice\n", argv[i]);
+                ins.cmd = PARSER_ERROR;
+                free_instruction(ins);
+                return ins;
+            }
+        }
         ins.files[ins.files_count++] = argv[i];
     }
 

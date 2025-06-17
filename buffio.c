@@ -196,3 +196,18 @@ void FileBufferIO_close(FileBufferIO* fb) {
     free(fb->buffer);
     free(fb);
 }
+
+void FileBufferIO_close_remove(FileBufferIO* fb) {
+    fclose(fb->fp);
+
+    if (remove(fb->path) == 0) {
+        printf("Deleted %s.\n", fb->path);
+    } else {
+        printf("Failed to delete %s.\n", fb->path);
+    }
+
+    free(fb->path);
+    free(fb->modes);
+    free(fb->buffer);
+    free(fb);
+}
