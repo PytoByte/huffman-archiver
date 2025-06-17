@@ -31,11 +31,18 @@ size_t get_filesize(const char* filepath) {
 }
 
 char* get_filename(char* filepath) {
-   char* filename = strrchr(filepath, '/');
-   if (filename == NULL)
-       return filepath; // If no separators are found, return the entire filepath
+    // Clear tail
+    int i = strlen(filepath);
+    while (filepath[i] == '\0' || filepath[i] == '.' || filepath[i] == '\\' || filepath[i] == '/' || filepath[i] == ' ') {
+        filepath[i] = '\0';
+        i--;
+    }
+    // Clear head
+    char* filename = strrchr(filepath, '/');
+    if (filename == NULL)
+        return filepath; // If no separators are found, return the entire filepath
 
-   return filename + 1; // Skip the separator itself
+    return filename + 1; // Skip the separator itself
 }
 
 char* generate_unique_filepath(const char* path) {

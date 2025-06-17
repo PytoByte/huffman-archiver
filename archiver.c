@@ -321,6 +321,8 @@ static PreparedFilesResult prepare_headers(FileBufferIO* archive, Queue* queue, 
         return (PreparedFilesResult){0, 0};
     }
 
+    
+
     PreparedFilesResult files = {0, 0};
     while ((entry = readdir(dir)) != NULL) {
         if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
