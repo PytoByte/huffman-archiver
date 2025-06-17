@@ -13,7 +13,7 @@ make
 ```
 ### Архивирование
 ```sh
-./huf -compress [files|dirs] -output <file> -word <number> [-sw]
+./huf -compress [files|dirs] -output <file> -word <number> [-aw|-dw]
 ```
 Параметры:
 **-output** выходной архив (по умолчанию "archive.huff")
